@@ -1,0 +1,28 @@
+
+# Reminder:
+# - A leading slash means the pattern is anchored at the root.
+# - No leading slash means the pattern matches at any depth.
+
+# Python files
+*.pyc
+__pycache__/
+.mypy_cache/
+
+# IntelliJ IDEA / PyCharm project files
+/.idea
+/*.iml
+
+# MyPy
+.mypy_cache
+
+# PyCharm JIRA plugin
+atlassian-ide-plugin.xml
+
+# Virtualenv
+.venv
+
+# OS X metadata files
+.DS_Store
+
+# Temporary folder
+/tmp
