@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 """
 Classes to load data files and bundles into the HCA Data Storage System (DSS).
 The data files may be located in AWS and/or GCP buckets, which may require
@@ -245,6 +243,9 @@ class MetadataFileUploader:
         metadata['describedBy'] = schema_url
         return self.dss_uploader.upload_dict_as_file(metadata, filename, bundle_uuid)
 
+def load_json_from_file(input_file_path: str) -> dict:
+        with open(input_file_path) as fh:
+            return json.load(fh)
 
 def suppress_verbose_logging():
     for logger_name in logging.Logger.manager.loggerDict:  # type: ignore
