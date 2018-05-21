@@ -10,7 +10,7 @@ class TestBasicInputFormatLoading(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.dss_endpoint = os.getenv("TEST_DSS_ENDPOINT", "https://hca-dss-4.ucsc-cgp-dev.org/")
+        cls.dss_endpoint = os.getenv("TEST_DSS_ENDPOINT", "https://hca-dss-4.ucsc-cgp-dev.org/v1")
         cls.staging_bucket = os.getenv("DSS_S3_STAGING_BUCKET", "mbaumann-dss-staging")
         cls.git_repo = git.Repo(os.getcwd(), search_parent_directories=True)
         cls.project_path = cls.git_repo.git.rev_parse("--show-toplevel")
