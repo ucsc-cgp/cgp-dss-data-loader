@@ -60,7 +60,7 @@ def main(argv):
     if options.input_format == "basic":
         bundle_uploader = BasicFormatBundleUploader(dss_uploader, metadata_file_uploader)
         bundle_uploader.load_all_bundles(base_loader.load_json_from_file(options.json_input_file))
-    elif options.data_set == "gen3":
+    elif options.input_format == "gen3":
         bundle_uploader = Gen3FormatBundleUploader(dss_uploader, metadata_file_uploader)
         bundle_uploader.load_all_bundles(base_loader.load_json_from_file(options.json_input_file))
 
