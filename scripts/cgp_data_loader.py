@@ -50,8 +50,8 @@ def main(argv):
 
     # The ACLs on the TOPMed Google buckets are based on user accounts.
     # Clear configured Google credentials, which are likely for service accounts.
-    os.environ.pop('GOOGLE_APPLICATION_CREDENTIALS', None)
-    os.environ.pop('GOOGLE_APPLICATION_SECRETS', None)
+    # os.environ.pop('GOOGLE_APPLICATION_CREDENTIALS', None)
+    # os.environ.pop('GOOGLE_APPLICATION_SECRETS', None)
 
     dss_uploader = base_loader.DssUploader(options.dss_endpoint, options.staging_bucket,
                                            GOOGLE_PROJECT_ID, options.dry_run)
