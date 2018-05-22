@@ -100,7 +100,7 @@ class DssUploader:
             metadata['crc32c'] = binascii.hexlify(base64.b64decode(blob_obj.crc32c)).decode("utf-8").lower()
             metadata['size'] = blob_obj.size
         except Exception as e:
-            logger.warning(f"Error accessing s3://{bucket}/{key} Exception: {e}")
+            logger.warning(f"Error accessing gs://{bucket}/{key} Exception: {e}")
         return metadata
 
     @staticmethod
