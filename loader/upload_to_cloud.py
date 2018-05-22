@@ -51,52 +51,42 @@ def _copy_from_s3(path, s3, tx_cfg):
     return file_uuids, key_names
 
 
-def upload_to_cloud(file_handles, staging_bucket, replica, from_cloud=False, content_type=None):
+def upload_to_cloud(file_handle, file_uuid, staging_bucket, content_type=None):
     """
-    Upload files to cloud.
+    Upload a file to cloud.
 
-    :param file_handles: If from_cloud, file_handles is a aws s3 directory path to files with appropriate
-                         metadata uploaded. Else, a list of binary file_handles to upload.
+    :param file_handle: file handle to be uploaded.
+    :param file_uuid: uuid to be used when uploading the file
     :param staging_bucket: The aws bucket to upload the files to.
-    :param replica: The cloud replica to write to. One of 'aws', 'gc', or 'azure'. No functionality now.
+    :param content_type: the type of content in for format returned by _mime_type()
     :return: a list of each file's unique key name.
     """
     tx_cfg = TransferConfig(multipart_threshold=S3Etag.etag_stride,
                             multipart_chunksize=S3Etag.etag_stride)
     s3 = boto3.resource("s3")
-    file_uuids = []
-    key_names = []
 
-    if from_cloud:
-        file_uuids, key_names = _copy_from_s3(file_handles[0], s3, tx_cfg)
+    destination_bucket = s3.Bucket(staging_bucket)
+    with ChecksummingBufferedReader(file_handle) as fh:
+        key_name = "{}/{}".format(file_uuid, os.path.basename(fh.raw.name))
+        destination_bucket.upload_fileobj(
+            fh,
+            key_name,
+            Config=tx_cfg,
+            ExtraArgs={
+                'ContentType': content_type if content_type is not None else _mime_type(fh.raw.name)
+            }
+        )
+        sums = fh.get_checksums()
+        metadata = {
+            "hca-dss-s3_etag": sums["s3_etag"],
+            "hca-dss-sha1": sums["sha1"],
+            "hca-dss-sha256": sums["sha256"],
+            "hca-dss-crc32c": sums["crc32c"],
+        }
 
-    else:
-        destination_bucket = s3.Bucket(staging_bucket)
-        for raw_fh in file_handles:
-            with ChecksummingBufferedReader(raw_fh) as fh:
-                file_uuid = str(uuid.uuid4())
-                key_name = "{}/{}".format(file_uuid, os.path.basename(fh.raw.name))
-                destination_bucket.upload_fileobj(
-                    fh,
-                    key_name,
-                    Config=tx_cfg,
-                    ExtraArgs={
-                        'ContentType': content_type if content_type is not None else _mime_type(fh.raw.name)
-                    }
-                )
-                sums = fh.get_checksums()
-                metadata = {
-                    "hca-dss-s3_etag": sums["s3_etag"],
-                    "hca-dss-sha1": sums["sha1"],
-                    "hca-dss-sha256": sums["sha256"],
-                    "hca-dss-crc32c": sums["crc32c"],
-                }
+        s3.meta.client.put_object_tagging(Bucket=destination_bucket.name,
+                                          Key=key_name,
+                                          Tagging=dict(TagSet=encode_tags(metadata))
+                                          )
 
-                s3.meta.client.put_object_tagging(Bucket=destination_bucket.name,
-                                                  Key=key_name,
-                                                  Tagging=dict(TagSet=encode_tags(metadata))
-                                                  )
-                file_uuids.append(file_uuid)
-                key_names.append(key_name)
-
-    return file_uuids, key_names
+    return file_uuid, key_name

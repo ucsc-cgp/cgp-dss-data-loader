@@ -19,6 +19,7 @@ import logging
 import os
 import time
 import typing
+import uuid
 from io import open
 from tempfile import mkdtemp
 from urllib.parse import urlparse
@@ -59,11 +60,16 @@ class DssUploader:
             self._set_hca_metadata_tags(self.s3_client, bucket, key, checksums)
         return self._upload_tagged_cloud_file_to_dss(bucket, key, file_uuid, bundle_uuid)
 
-    def upload_cloud_file_by_reference(self, filename: str, file_cloud_urls: set, bundle_uuid: str, file_uuid: str) -> tuple:
+    def upload_cloud_file_by_reference(self,
+                                       filename: str,
+                                       file_uuid: str,
+                                       file_cloud_urls: set,
+                                       bundle_uuid: str) -> tuple:
         if self.dry_run:
             logger.info(f"DRY RUN: upload_cloud_file_by_reference: {filename} {str(file_cloud_urls)} {bundle_uuid}")
         file_reference = self._create_file_reference(file_cloud_urls)
-        return self.upload_dict_as_file(file_reference, filename, bundle_uuid, "application/json; dss-type=fileref")
+        return self.upload_dict_as_file(file_reference, filename, file_uuid, bundle_uuid,
+                                        "application/json; dss-type=fileref")
 
     def _create_file_reference(self, file_cloud_urls: set) -> dict:
         s3_metadata = None
@@ -113,19 +119,19 @@ class DssUploader:
         consolidated_metadata['url'] = list(file_cloud_urls)
         return consolidated_metadata
 
-    def upload_dict_as_file(self, value: dict, filename: str, bundle_uuid: str, content_type=None):
+    def upload_dict_as_file(self, value: dict, filename: str, file_uuid: str, bundle_uuid: str, content_type=None):
         tempdir = mkdtemp()
         file_path = "/".join([tempdir, filename])
         with open(file_path, "w") as fh:
             fh.write(json.dumps(value, indent=4))
-        result = self.upload_local_file(file_path, bundle_uuid, content_type)
+        result = self.upload_local_file(file_path, file_uuid, bundle_uuid, content_type)
         os.remove(file_path)
         os.rmdir(tempdir)
         return result
 
     # TODO Add ability to specify file_uuid
-    def upload_local_file(self, path: str, bundle_uuid: str, content_type=None):
-        file_uuid, key = self._upload_local_file_to_staging(path, content_type)
+    def upload_local_file(self, path: str, file_uuid: str, bundle_uuid: str, content_type=None):
+        file_uuid, key = self._upload_local_file_to_staging(path, file_uuid, content_type)
         return self._upload_tagged_cloud_file_to_dss(self.staging_bucket, key, file_uuid, bundle_uuid)
 
     def load_bundle(self, file_info_list: list, bundle_uuid: str):
@@ -145,10 +151,10 @@ class DssUploader:
         return key.split("/")[-1]
 
     # TODO Add ability to specify file_uuid
-    def _upload_local_file_to_staging(self, path: str, content_type):
+    def _upload_local_file_to_staging(self, path: str, file_uuid: str, content_type):
         with open(path, "rb") as fh:
-            file_uuids, key_names = upload_to_cloud([fh], self.staging_bucket, "aws", False, content_type)
-        return file_uuids[0], key_names[0]
+            file_uuid, key_name = upload_to_cloud(fh, file_uuid, self.staging_bucket, content_type)
+        return file_uuid, key_name
 
     @staticmethod
     def _has_hca_tags(blobstore: BlobStore, bucket: str, key: str) -> bool:
@@ -241,7 +247,7 @@ class MetadataFileUploader:
 
     def load_dict(self, metadata: dict, filename: str, schema_url: str, bundle_uuid: str) -> tuple:
         metadata['describedBy'] = schema_url
-        return self.dss_uploader.upload_dict_as_file(metadata, filename, bundle_uuid)
+        return self.dss_uploader.upload_dict_as_file(metadata, filename, str(uuid.uuid4()), bundle_uuid)
 
 def load_json_from_file(input_file_path: str) -> dict:
         with open(input_file_path) as fh:
