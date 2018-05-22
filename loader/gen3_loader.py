@@ -11,23 +11,33 @@ class Gen3FormatBundleUploader:
         self.dss_uploader = dss_uploader
         self.metadata_file_uploader = metadata_file_uploader
 
-    def _load_bundle(self, bundle: dict):
+    @staticmethod
+    def _parse_bundle(bundle: dict) -> tuple:
         try:
             bundle_uuid = bundle['bundle_did']
         except KeyError:
             bundle_uuid = uuid.uuid4()
+        try:
+            metadata_dict = bundle['metadata']
+        except KeyError:
+            metadata_dict = {key: bundle[key] for key in ['aliquot', 'sample', 'core_metadata']}
+        file_manifest = bundle['manifest']
+        return bundle_uuid, metadata_dict, file_manifest
+
+    def _load_bundle(self, bundle: dict):
+        bundle_uuid, metadata_dict, file_manifest = self._parse_bundle(bundle)
         file_info_list = []
 
         # load metadata
         file_uuid, file_version, filename = \
-            self.metadata_file_uploader.load_dict(bundle['metadata'],
+            self.metadata_file_uploader.load_dict(metadata_dict,
                                                   "metadata.json",
                                                   SCHEMA_URL,
                                                   bundle_uuid)
         file_info_list.append(dict(uuid=file_uuid, version=file_version, name=filename, indexed=True))
 
         # load data files by reference
-        for file_info in bundle['manifest']:
+        for file_info in file_manifest:
             cloud_urls = {file_info[key] for key in ['s3url', 'gsurl']}
             file_uuid, file_version, filename = \
                 self.dss_uploader.upload_cloud_file_by_reference(file_info['name'],
