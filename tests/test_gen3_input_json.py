@@ -74,7 +74,8 @@ class TestBasicInputFormatLoading(unittest.TestCase):
                     assert f['indexed'] is False
                     assert 'dss-type=fileref' in f['content-type']
 
-    def test_gen3_input_format_loading_from_cli(self, sample_input):
+    def test_gen3_input2_format_loading_from_cli(self):
+        self.test_gen3_input_format_loading_from_cli(sample_input='/tests/test_data/gen3_sample_input2.json')
 
     def test_known_guid_exists(self):
         '''
