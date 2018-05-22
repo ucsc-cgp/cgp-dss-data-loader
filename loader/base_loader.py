@@ -64,14 +64,15 @@ class DssUploader:
                                        filename: str,
                                        file_uuid: str,
                                        file_cloud_urls: set,
-                                       bundle_uuid: str) -> tuple:
+                                       bundle_uuid: str,
+                                       guid: str) -> tuple:
         if self.dry_run:
             logger.info(f"DRY RUN: upload_cloud_file_by_reference: {filename} {str(file_cloud_urls)} {bundle_uuid}")
-        file_reference = self._create_file_reference(file_cloud_urls)
+        file_reference = self._create_file_reference(file_cloud_urls, guid)
         return self.upload_dict_as_file(file_reference, filename, file_uuid, bundle_uuid,
                                         "application/json; dss-type=fileref")
 
-    def _create_file_reference(self, file_cloud_urls: set) -> dict:
+    def _create_file_reference(self, file_cloud_urls: set, guid: str) -> dict:
         s3_metadata = None
         gs_metadata = None
         for cloud_url in file_cloud_urls:
@@ -84,7 +85,7 @@ class DssUploader:
                 gs_metadata = self._get_gs_file_metadata(bucket, key)
             else:
                 logger.warning("Unsupported cloud URL scheme: {cloud_url}")
-        return self._consolidate_metadata(file_cloud_urls, s3_metadata, gs_metadata)
+        return self._consolidate_metadata(file_cloud_urls, s3_metadata, gs_metadata, guid)
 
     def _get_s3_file_metadata(self, bucket: str, key: str) -> dict:
         metadata = dict()
@@ -110,13 +111,15 @@ class DssUploader:
         return metadata
 
     @staticmethod
-    def _consolidate_metadata(file_cloud_urls: set, s3_metadata: dict, gs_metadata: dict) -> dict:
+    def _consolidate_metadata(file_cloud_urls: set, s3_metadata: dict, gs_metadata: dict, guid: str) -> dict:
         consolidated_metadata = dict()
         if s3_metadata:
             consolidated_metadata.update(s3_metadata)
         if gs_metadata:
             consolidated_metadata.update(gs_metadata)
         consolidated_metadata['url'] = list(file_cloud_urls)
+        # TODO double check aliases
+        consolidated_metadata['aliases'] = [str(guid)]
         return consolidated_metadata
 
     def upload_dict_as_file(self, value: dict, filename: str, file_uuid: str, bundle_uuid: str, content_type=None):

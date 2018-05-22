@@ -40,12 +40,15 @@ class TestBasicInputFormatLoading(unittest.TestCase):
 
         # mint a new 'bundle_did'
         guid = str(uuid.uuid4())
+        # make new guid for first file
+        file_guid = str(uuid.uuid4())
 
         # copy the contents of json_input_file to tmp_json
         # but change 'bundle_did' to a new guid
         with open(json_input_file, 'r') as jsonFile:
             json_contents = json.load(jsonFile)
         json_contents[0]['bundle_did'] = guid
+        json_contents[0]['manifest'][0]['did'] = file_guid
         with open(tmp_json, 'w') as jsonFile:
             json.dump(json_contents, jsonFile)
 
@@ -68,10 +71,19 @@ class TestBasicInputFormatLoading(unittest.TestCase):
         for r in res['results']:
             response = requests.get(r['bundle_url'])
             returned_json = response.json()
+            found_matching_file = False
             for f in returned_json['bundle']['files']:
                 if f['name'] != 'metadata.json':
                     assert f['indexed'] is False
                     assert 'dss-type=fileref' in f['content-type']
+
+                    # verify that the guid is stored
+                    file_ref_json = self.client.get_file(uuid=f['uuid'], version=f['version'], replica='aws')
+                    found_matching_file = found_matching_file or file_ref_json['aliases'][0] == file_guid
+            assert found_matching_file
+
+        os.remove(tmp_json)
+
 
     def test_gen3_input2_format_loading_from_cli(self):
         self.test_gen3_input_format_loading_from_cli(sample_input='/tests/test_data/gen3_sample_input2.json')

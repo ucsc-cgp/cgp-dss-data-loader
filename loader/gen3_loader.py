@@ -41,9 +41,12 @@ class Gen3FormatBundleUploader:
             cloud_urls = {file_info[key] for key in ['s3url', 'gsurl']}
             file_uuid, file_version, filename = \
                 self.dss_uploader.upload_cloud_file_by_reference(file_info['name'],
+                                                                 # use did for uuid for now. will probably have to
+                                                                 # extract from guid (did) in the future
                                                                  file_info['did'],
                                                                  cloud_urls,
-                                                                 bundle_uuid)
+                                                                 bundle_uuid,
+                                                                 file_info['did'])
             file_info_list.append(dict(uuid=file_uuid, version=file_version, name=filename, indexed=False))
 
         # load bundle
