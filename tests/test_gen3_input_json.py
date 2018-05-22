@@ -62,7 +62,6 @@ class TestBasicInputFormatLoading(unittest.TestCase):
 
         # search for the newly minted guid in the DSS and make sure it now exists and uploading was successful
         res = self.client.post_search(es_query={'query': {'term': {'uuid': guid}}}, replica='aws')
-        print(res)
         assert res['total_hits'] > 0
 
         # verify that all of the results (except metadata.json) are file references and not indexed
