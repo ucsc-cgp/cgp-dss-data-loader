@@ -5,3 +5,9 @@ dcplib >= 1.1.0, < 2
 google-cloud-storage >= 1.9.0, < 2
 hca >= 3.5.1, < 4
 requests >= 2.18.4, < 3
+
+# topmed metadata exporter
+lifelines >= 0.14.2
+numpy >= 1.14.3
+scipy >= 1.1.0
+matplotlib >= 2.2.2
