@@ -15,7 +15,7 @@ tests:=$(wildcard tests/test_*.py)
 # A pattern rule that runs a single test script
 #
 $(tests): %.py : mypy lint
-	python -m unittest
+	python -m unittest $*.py
 
 test: $(tests)
 
