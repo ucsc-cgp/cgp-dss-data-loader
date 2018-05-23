@@ -1,7 +1,10 @@
 language: python
 python:
- - "3.6"
+- '3.6'
+before_install:
+- openssl aes-256-cbc -K $encrypted_e70c9f59db9f_key -iv $encrypted_e70c9f59db9f_iv
+  -in client-secret.json.enc -out client-secret.json -d
 install:
- - pip install -r requirements-dev.txt
+- pip install -r requirements-dev.txt
 script:
- - make test
+- make test
