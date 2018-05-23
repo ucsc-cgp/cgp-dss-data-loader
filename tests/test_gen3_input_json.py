@@ -10,7 +10,7 @@ import requests
 import git
 
 
-class TestBasicInputFormatLoading(unittest.TestCase):
+class TestGen3InputFormatLoading(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
