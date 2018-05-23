@@ -22,6 +22,7 @@ import typing
 import uuid
 from io import open
 from tempfile import mkdtemp
+from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 import boto3
@@ -111,7 +112,7 @@ class DssUploader:
         return metadata
 
     @staticmethod
-    def _consolidate_metadata(file_cloud_urls: set, s3_metadata: dict, gs_metadata: dict, guid: str) -> dict:
+    def _consolidate_metadata(file_cloud_urls: set, s3_metadata: Optional[Dict[str, Any]], gs_metadata: Optional[Dict[str, Any]], guid: str) -> dict:
         consolidated_metadata = dict()
         if s3_metadata:
             consolidated_metadata.update(s3_metadata)

@@ -23,7 +23,7 @@ class TestBasicInputFormatLoading(unittest.TestCase):
         cls.project_path = cls.git_repo.git.rev_parse('--show-toplevel')
 
     def test_gen3_input_format_loading_from_cli(self, sample_input='/tests/test_data/gen3_sample_input.json'):
-        '''
+        """
         Test that a gen3 formatted json can be uploaded to the DSS, and that all of
         the files loaded are only loaded by reference (and also are not indexed).
 
@@ -31,8 +31,8 @@ class TestBasicInputFormatLoading(unittest.TestCase):
         2. Searches the DCC to make sure it doesn't already exist using the HCA CLI.
         3. Uploads the gen3 json to the DSS.
         4. Searches the DCC to make sure it now exists and the upload was successful.
-        5. Assert files are 
-        '''
+        5. Assert files are
+        """
         # gen3 json template to use
         json_input_file = f'{self.project_path}' + sample_input
         # modified json_input_file with the template 'bundle_did' overwritten to a fresh one
@@ -83,7 +83,6 @@ class TestBasicInputFormatLoading(unittest.TestCase):
             assert found_matching_file
 
         os.remove(tmp_json)
-
 
     def test_gen3_input2_format_loading_from_cli(self):
         self.test_gen3_input_format_loading_from_cli(sample_input='/tests/test_data/gen3_sample_input2.json')
