@@ -15,6 +15,7 @@ class TestBasicInputFormatLoading(unittest.TestCase):
         cls.git_repo = git.Repo(os.getcwd(), search_parent_directories=True)
         cls.project_path = cls.git_repo.git.rev_parse("--show-toplevel")
 
+    @unittest.skip("Support for the basic import format is not implemented and is a low priority.")
     def test_basic_input_format_loading_from_cli(self):
         json_input_file = f"{self.project_path}/tests/test_data/basic_sample_input.json"
 

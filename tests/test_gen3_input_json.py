@@ -10,7 +10,7 @@ import requests
 import git
 
 
-class TestBasicInputFormatLoading(unittest.TestCase):
+class TestGen3InputFormatLoading(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
@@ -23,7 +23,7 @@ class TestBasicInputFormatLoading(unittest.TestCase):
         cls.project_path = cls.git_repo.git.rev_parse('--show-toplevel')
 
     def test_gen3_input_format_loading_from_cli(self, sample_input='/tests/test_data/gen3_sample_input.json'):
-        '''
+        """
         Test that a gen3 formatted json can be uploaded to the DSS, and that all of
         the files loaded are only loaded by reference (and also are not indexed).
 
@@ -34,7 +34,7 @@ class TestBasicInputFormatLoading(unittest.TestCase):
         4. Searches the DSS to make sure it now exists and the upload was successful.
         5. Assert files are loaded by reference (and also are not indexed).
         6. Assert that the new 'did' for the first file in the bundle was found in the results.
-        '''
+        """
         # gen3 json template to use
         json_input_file = f'{self.project_path}' + sample_input
         # modified json_input_file with the template 'bundle_did' overwritten to a fresh one

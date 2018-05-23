@@ -1,6 +1,6 @@
 
 include common.mk
-MODULES=loader tests
+MODULES=loader scripts tests datasets/topmed/topmed_107_open_access
 
 all: test
 
@@ -12,10 +12,11 @@ mypy:
 
 tests:=$(wildcard tests/test_*.py)
 
-# A pattern rule that runs a single test script
-#
+# A pattern rule that runs a single test module, for example:
+#   make tests/test_gen3_input_json.py
+
 $(tests): %.py : mypy lint
-	python -m unittest
+	python -m unittest $*.py
 
 test: $(tests)
 
