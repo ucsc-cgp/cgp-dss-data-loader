@@ -27,11 +27,13 @@ class TestBasicInputFormatLoading(unittest.TestCase):
         Test that a gen3 formatted json can be uploaded to the DSS, and that all of
         the files loaded are only loaded by reference (and also are not indexed).
 
-        1. Generates a json from a template with a new unique 'bundle_did'.
-        2. Searches the DCC to make sure it doesn't already exist using the HCA CLI.
+        1. Generates a json from a template with a new unique 'bundle_did'
+           and a new 'did' for the first file in the bundle.
+        2. Searches the DSS to make sure it doesn't already exist using the HCA CLI.
         3. Uploads the gen3 json to the DSS.
-        4. Searches the DCC to make sure it now exists and the upload was successful.
-        5. Assert files are 
+        4. Searches the DSS to make sure it now exists and the upload was successful.
+        5. Assert files are loaded by reference (and also are not indexed).
+        6. Assert that the new 'did' for the first file in the bundle was found in the results.
         '''
         # gen3 json template to use
         json_input_file = f'{self.project_path}' + sample_input
@@ -68,22 +70,20 @@ class TestBasicInputFormatLoading(unittest.TestCase):
         assert res['total_hits'] > 0
 
         # verify that all of the results (except metadata.json) are file references and not indexed
+        found_matching_file = False
         for r in res['results']:
             response = requests.get(r['bundle_url'])
             returned_json = response.json()
-            found_matching_file = False
             for f in returned_json['bundle']['files']:
                 if f['name'] != 'metadata.json':
                     assert f['indexed'] is False
                     assert 'dss-type=fileref' in f['content-type']
 
-                    # verify that the guid is stored
+                    # verify that the file guid is stored
                     file_ref_json = self.client.get_file(uuid=f['uuid'], version=f['version'], replica='aws')
                     found_matching_file = found_matching_file or file_ref_json['aliases'][0] == file_guid
-            assert found_matching_file
-
+        assert found_matching_file
         os.remove(tmp_json)
-
 
     def test_gen3_input2_format_loading_from_cli(self):
         self.test_gen3_input_format_loading_from_cli(sample_input='/tests/test_data/gen3_sample_input2.json')
