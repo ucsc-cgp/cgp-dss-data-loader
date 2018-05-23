@@ -29,9 +29,9 @@ def main(argv):
     parser = argparse.ArgumentParser(description=__doc__)
     dry_run_group = parser.add_mutually_exclusive_group(required=True)
     dry_run_group.add_argument("--dry-run", dest="dry_run", action="store_true",
-                       help="Output actions that would otherwise be performed.")
+                               help="Output actions that would otherwise be performed.")
     dry_run_group.add_argument("--no-dry-run", dest="dry_run", action="store_false",
-                       help="Perform the actions.")
+                               help="Perform the actions.")
     parser.add_argument("--dss-endpoint", metavar="DSS_ENDPOINT", required=False,
                         default=DSS_ENDPOINT_DEFAULT,
                         help="HCA Data Storage System endpoint to use")
@@ -42,10 +42,10 @@ def main(argv):
     subparsers = parser.add_subparsers(dest='input_format', help='Input file format')
     input_format = subparsers.add_parser("basic", help='"Basic" CGP DSS input file format')
     input_format.add_argument("--json-input-file", metavar="JSON_INPUT_FILE", required=True,
-                                           help="Path to the basic JSON format input file")
+                              help="Path to the basic JSON format input file")
     input_format = subparsers.add_parser("gen3", help='University of Chicago Gen3 input file format')
     input_format.add_argument("--json-input-file", metavar="JSON_INPUT_FILE", required=True,
-                                           help="Path to the Gen3 JSON format input file")
+                              help="Path to the Gen3 JSON format input file")
     options = parser.parse_args(argv)
 
     # The ACLs on the TOPMed Google buckets are based on user accounts.
