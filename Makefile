@@ -12,8 +12,9 @@ mypy:
 
 tests:=$(wildcard tests/test_*.py)
 
-# A pattern rule that runs a single test script
-#
+# A pattern rule that runs a single test module, for example:
+#   make tests/test_gen3_input_json.py
+
 $(tests): %.py : mypy lint
 	python -m unittest $*.py
 
