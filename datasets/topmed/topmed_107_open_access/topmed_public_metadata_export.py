@@ -9,7 +9,7 @@ def setup_credentials():
 
 
 ALIGNED_READS_QUERY = """
-query AlignedReads ($projectID: [String], $first: Int, $offset: Int) 
+query AlignedReads ($projectID: [String], $first: Int, $offset: Int)
     {
      submitted_aligned_reads(project_id: $projectID, first: $first, offset: $offset) {
         id
@@ -39,7 +39,7 @@ def get_alignments():
 
 
 READ_INDEX_QUERY = """
-query ReadIndexes ($id: String) 
+query ReadIndexes ($id: String)
     {
      aligned_reads_index(id: $id) {
         id
@@ -129,7 +129,7 @@ def flatten_bundles(indexd_bundles):
 
 
 CORE_METADATA_QUERY = """
-query CoreMetadata ($id: String) 
+query CoreMetadata ($id: String)
     {
      core_metadata(id: $id) {
           description
@@ -168,7 +168,7 @@ def flatten_core_metadata(core_metadata):
 
 
 READ_GROUP_QUERY = """
-query ReadGroupLinks ($id: String) 
+query ReadGroupLinks ($id: String)
     {
      read_group(id: $id) {
      _links {
@@ -191,7 +191,7 @@ def alignments_to_read_groups(alignments):
 
 
 ALIQUOT_QUERY = """
-query Aliquots ($id: String) 
+query Aliquots ($id: String)
     {
      aliquot(id: $id) {
         type
@@ -230,7 +230,7 @@ def read_groups_to_aliquots(read_groups):
 
 
 SAMPLE_QUERY = """
-query SampleMetadata ($id: String) 
+query SampleMetadata ($id: String)
     {
      sample(id: $id) {
         id
@@ -272,7 +272,7 @@ def aliquots_to_samples(aliquots):
         for link in aliquot['data']['aliquot'][0]['_links']:
             if link['type'] == 'sample':
                 sample_ids.append(link['id'])
-    return [dcp.query_api(SAMPLE_QUERY,  {'id': x}) for x in sample_ids]
+    return [dcp.query_api(SAMPLE_QUERY, {'id': x}) for x in sample_ids]
 
 
 def flatten_aliquot(aliquots):

@@ -64,6 +64,7 @@ def main(argv):
         bundle_uploader = Gen3FormatBundleUploader(dss_uploader, metadata_file_uploader)
         bundle_uploader.load_all_bundles(base_loader.load_json_from_file(options.json_input_file))
 
+
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
