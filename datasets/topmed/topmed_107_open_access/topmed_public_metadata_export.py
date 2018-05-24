@@ -306,10 +306,10 @@ def make_bundles():
     flattened_samples = flatten_samples(samples)
     flattened_aliquots = flatten_aliquot(aliquots)
     return list(zip(flattened_core_metadata,
-               flattened_aliquots,
-               flattened_samples,
-               [f[0] for f in flattened_bundles],  # alignment
-               [f[1] for f in flattened_bundles])) # index
+                flattened_aliquots,
+                flattened_samples,
+                [f[0] for f in flattened_bundles],  # alignment
+                [f[1] for f in flattened_bundles])) # index
 
 
 def write_bundles_to_files(bundles, filename):

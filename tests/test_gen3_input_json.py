@@ -1,6 +1,7 @@
 import os
 import subprocess
 import unittest
+import warnings
 import hca
 import uuid
 import json
@@ -8,6 +9,17 @@ import time
 import requests
 
 import git
+
+from scripts.cgp_data_loader import main
+
+
+def ignore_resource_warnings(test_func):
+    # see https://stackoverflow.com/q/26563711/7830612 for justification
+    def do_test(self, *args, **kwargs):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", ResourceWarning)
+            test_func(self, *args, **kwargs)
+    return do_test
 
 
 class TestGen3InputFormatLoading(unittest.TestCase):
@@ -22,6 +34,7 @@ class TestGen3InputFormatLoading(unittest.TestCase):
         cls.git_repo = git.Repo(os.getcwd(), search_parent_directories=True)
         cls.project_path = cls.git_repo.git.rev_parse('--show-toplevel')
 
+    @ignore_resource_warnings
     def test_gen3_input_format_loading_from_cli(self, sample_input='/tests/test_data/gen3_sample_input.json'):
         """
         Test that a gen3 formatted json can be uploaded to the DSS, and that all of
@@ -59,9 +72,15 @@ class TestGen3InputFormatLoading(unittest.TestCase):
         assert res['total_hits'] == 0
 
         # upload the data bundle to the DSS
-        run(f'{self.project_path}/scripts/cgp_data_loader.py --no-dry-run --dss-endpoint {self.dss_endpoint}'
-            f' --staging-bucket {self.staging_bucket}'
-            f' gen3 --json-input-file {tmp_json}')
+        args = ['--no-dry-run',
+                '--dss-endpoint',
+                f'{self.dss_endpoint}',
+                '--staging-bucket',
+                f'{self.staging_bucket}',
+                'gen3',
+                '--json-input-file',
+                f'{tmp_json}']
+        main(args)
 
         time.sleep(5) # there is some lag in uploading
 
