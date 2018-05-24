@@ -35,7 +35,7 @@ def make_query(query, variables):
 
 def get_alignments():
     pages = [{'first': 1, 'offset': i, 'projectID': 'topmed-public'} for i in range(107)]
-    return map(lambda page: make_query(ALIGNED_READS_QUERY, page), pages)
+    return list(map(lambda page: make_query(ALIGNED_READS_QUERY, page), pages))
 
 
 READ_INDEX_QUERY = """
@@ -64,8 +64,8 @@ def alignments_to_raw_bundles(alignments):
                 index_ids.append(link['id'])
 
     pages = [{'id': x} for x in index_ids]
-    indices = map(lambda page: make_query(READ_INDEX_QUERY, page), pages)
-    return zip(alignments, indices)
+    indices = list(map(lambda page: make_query(READ_INDEX_QUERY, page), pages))
+    return list(zip(alignments, indices))
 
 
 INDEXD_URL = 'https://dcp.bionimbus.org/index'
@@ -79,7 +79,7 @@ def get_indexd_id_by_checksum(checksum):
 def fix_bundles(raw_bundles):
     hashes = [bundle[1]['data']['aligned_reads_index'][0]['md5sum'] for bundle in raw_bundles]
     indexd_ids = [get_indexd_id_by_checksum(chk) for chk in hashes]
-    return zip(raw_bundles, indexd_ids)
+    return list(zip(raw_bundles, indexd_ids))
 
 
 def get_indexd_doc(indexd_id):
@@ -305,11 +305,11 @@ def make_bundles():
     samples = aliquots_to_samples(aliquots)
     flattened_samples = flatten_samples(samples)
     flattened_aliquots = flatten_aliquot(aliquots)
-    return zip(flattened_core_metadata,
+    return list(zip(flattened_core_metadata,
                flattened_aliquots,
                flattened_samples,
                [f[0] for f in flattened_bundles],  # alignment
-               [f[1] for f in flattened_bundles])  # index
+               [f[1] for f in flattened_bundles])) # index
 
 
 def write_bundles_to_files(bundles, filename):
