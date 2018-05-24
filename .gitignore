@@ -26,3 +26,6 @@ atlassian-ide-plugin.xml
 
 # Temporary folder
 /tmp
+
+# Travis-ci (don't want to accidentally commit google key)
+client-secret.json
