@@ -88,14 +88,6 @@ class TestGen3InputFormatLoading(unittest.TestCase):
     def test_gen3_input2_format_loading_from_cli(self):
         self.test_gen3_input_format_loading_from_cli(sample_input='/tests/test_data/gen3_sample_input2.json')
 
-    def test_known_guid_exists(self):
-        '''
-        Test to make sure 1+ search results are found for an existent guid in the DSS.
-        '''
-        guid = 'a47b90b2-0967-4fbf-87bc-c6c12db3fedf'
-        res = self.client.post_search(es_query={'query': {'term': {'uuid': guid}}}, replica='aws')
-        assert res['total_hits'] > 0
-
     def test_guid_missing(self):
         '''
         Test to make sure 0 search results are found for a non-existent guid in the DSS.
