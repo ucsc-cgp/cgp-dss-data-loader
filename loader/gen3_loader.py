@@ -46,7 +46,8 @@ class Gen3FormatBundleUploader:
                                                                  file_info['did'],
                                                                  cloud_urls,
                                                                  bundle_uuid,
-                                                                 file_info['did'])
+                                                                 file_info['did'],
+                                                                 file_version=file_info["updated_datetime"])
             file_info_list.append(dict(uuid=file_uuid, version=file_version, name=filename, indexed=False))
 
         # load bundle
