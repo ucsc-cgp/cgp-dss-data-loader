@@ -87,7 +87,8 @@ class DssUploader:
                                        file_uuid: str,
                                        file_cloud_urls: set,
                                        bundle_uuid: str,
-                                       guid: str) -> tuple:
+                                       guid: str,
+                                       file_version: str=None) -> tuple:
         """
         Takes a file's metadata, formats it as a dictionary, and uploads this dictionary as a json file to the DSS.
 
@@ -97,14 +98,19 @@ class DssUploader:
                                 e.g. {'gs://broad-public-datasets/g.bam', 's3://ucsc-topmed-datasets/a.bam'}
         :param bundle_uuid: A uuid.uuid4() format hash.
         :param guid: A uuid.uuid4() format hash.
+        :param file_version: a RFC3339 compliant datetime string
         :return: file_uuid: str, file_version: str, filename: str
         """
         if self.dry_run:
             logger.info(f"DRY RUN: upload_cloud_file_by_reference: {filename} {str(file_cloud_urls)} {bundle_uuid}")
 
         file_reference = self._create_file_reference(file_cloud_urls, guid)
-        return self.upload_dict_as_file(file_reference, filename, file_uuid, bundle_uuid,
-                                        "application/json; dss-type=fileref")
+        return self.upload_dict_as_file(file_reference,
+                                        filename,
+                                        file_uuid,
+                                        bundle_uuid,
+                                        file_version=file_version,
+                                        content_type="application/json; dss-type=fileref")
 
     def _create_file_reference(self, file_cloud_urls: set, guid: str) -> dict:
         """
@@ -113,6 +119,7 @@ class DssUploader:
         :param file_cloud_urls: A set of 'gs://' and 's3://' bucket links.
                                 e.g. {'gs://broad-public-datasets/g.bam', 's3://ucsc-topmed-datasets/a.bam'}
         :param guid: A uuid.uuid4() format hash.
+        :param file_version: RFC3339 formatted timestamp.
         :return: A dictionary of metadata values.
         """
         s3_metadata = None
@@ -192,7 +199,12 @@ class DssUploader:
         consolidated_metadata['aliases'] = [str(guid)]
         return consolidated_metadata
 
-    def upload_dict_as_file(self, value: dict, filename: str, file_uuid: str, bundle_uuid: str, content_type=None):
+    def upload_dict_as_file(self, value: dict,
+                            filename: str,
+                            file_uuid: str,
+                            bundle_uuid: str,
+                            file_version: str=None,  # RFC3339
+                            content_type=None):
         """
         Upload a dictionary representing a file's metadata as a json to the DSS.
 
@@ -201,29 +213,43 @@ class DssUploader:
         :param file_uuid: A uuid.uuid4() format hash.
         :param bundle_uuid: A uuid.uuid4() format hash.
         :param content_type: Content description, for example: "application/json; dss-type=fileref".
+        :param file_version: a RFC3339 compliant datetime string
         :return: file_uuid: str, file_version: str, filename: str
         """
         tempdir = mkdtemp()
         file_path = "/".join([tempdir, filename])
         with open(file_path, "w") as fh:
             fh.write(json.dumps(value, indent=4))
-        result = self.upload_local_file(file_path, file_uuid, bundle_uuid, content_type)
+        result = self.upload_local_file(file_path,
+                                        file_uuid,
+                                        bundle_uuid,
+                                        file_version=file_version,
+                                        content_type=content_type)
         os.remove(file_path)
         os.rmdir(tempdir)
         return result
 
-    # TODO Add ability to specify file_uuid
-    def upload_local_file(self, path: str, file_uuid: str, bundle_uuid: str, content_type=None):
+    def upload_local_file(self, path: str,
+                          file_uuid: str,
+                          bundle_uuid: str,
+                          file_version: str=None,
+                          content_type=None):
         """
+        Upload file to the DSS.
 
         :param path: Path to a local file.
         :param file_uuid: A uuid.uuid4() format hash.
         :param bundle_uuid: A uuid.uuid4() format hash.
         :param content_type: Content description, for example: "application/json; dss-type=fileref".
+        :param file_version: a RFC3339 compliant datetime string
         :return: file_uuid: str, file_version: str, filename: str
         """
         file_uuid, key = self._upload_local_file_to_staging(path, file_uuid, content_type)
-        return self._upload_tagged_cloud_file_to_dss(self.staging_bucket, key, file_uuid, bundle_uuid)
+        return self._upload_tagged_cloud_file_to_dss(self.staging_bucket,
+                                                     key,
+                                                     file_uuid,
+                                                     bundle_uuid,
+                                                     file_version=file_version)
 
     def load_bundle(self, file_info_list: list, bundle_uuid: str):
         """
@@ -249,7 +275,6 @@ class DssUploader:
         assert not key.endswith('/'), 'Please specify a filename, not a directory ({} cannot end in "/").'.format(key)
         return key.split("/")[-1]
 
-    # TODO Add ability to specify file_uuid
     def _upload_local_file_to_staging(self, path: str, file_uuid: str, content_type):
         """
         Uploads a local file to an s3 bucket.
@@ -317,7 +342,11 @@ class DssUploader:
                                      Tagging=dict(TagSet=encode_tags(metadata))
                                      )
 
-    def _upload_tagged_cloud_file_to_dss(self, source_bucket: str, source_key: str, file_uuid: str, bundle_uuid: str,
+    def _upload_tagged_cloud_file_to_dss(self, source_bucket: str,
+                                         source_key: str,
+                                         file_uuid: str,
+                                         bundle_uuid: str,
+                                         file_version: str=None,  # should be RFC3339
                                          timeout_seconds=1200):
         """
         Uploads a tagged file contained in a cloud bucket to the DSS.
@@ -335,16 +364,19 @@ class DssUploader:
         if self.dry_run:
             logger.info(
                 f"DRY RUN: _upload_tagged_cloud_file_to_dss: {source_bucket} {source_key} {file_uuid} {bundle_uuid}")
-            return file_uuid, None, filename
+            return file_uuid, file_version, filename
 
-        request_parameters = dict(uuid=file_uuid, bundle_uuid=bundle_uuid, creator_uid=CREATOR_ID,
+        request_parameters = dict(uuid=file_uuid, version=file_version, bundle_uuid=bundle_uuid, creator_uid=CREATOR_ID,
                                   source_url=source_url)
         if self.dry_run:
             print("DRY RUN: put file: " + str(request_parameters))
-            return file_uuid, None, filename
+            return file_uuid, file_version, filename
 
         copy_start_time = time.time()
         response = self.dss_client.put_file._request(request_parameters)
+
+        # the version we get back here is formatted in the way DSS likes
+        # and we need this format update when doing load bundle
         file_version = response.json().get('version', "blank")
 
         if response.status_code in (requests.codes.ok, requests.codes.created):

@@ -1,7 +1,11 @@
+import datetime
 import os
 import subprocess
+import tempfile
 import unittest
 import warnings
+from contextlib import contextmanager
+
 import hca
 import uuid
 import json
@@ -33,9 +37,46 @@ class TestGen3InputFormatLoading(unittest.TestCase):
         cls.staging_bucket = os.getenv('DSS_S3_STAGING_BUCKET', 'mbaumann-dss-staging')
         cls.git_repo = git.Repo(os.getcwd(), search_parent_directories=True)
         cls.project_path = cls.git_repo.git.rev_parse('--show-toplevel')
+        cls.test_files = [f'{cls.project_path}/tests/test_data/{test_file}'
+                          for test_file in ['gen3_sample_input.json', 'gen3_sample_input2.json']]
+
+    @staticmethod
+    @contextmanager
+    def _tmp_json_file(json_input_file, guid, file_guid, file_version):
+        # copy the contents of json_input_file to tmp_json
+        # but change 'bundle_did' to a new guid
+        with open(json_input_file, 'r') as jsonFile:
+            json_contents = json.load(jsonFile)
+        json_contents[0]['bundle_did'] = guid
+        json_contents[0]['manifest'][0]['did'] = file_guid
+        for file_info in json_contents[0]['manifest']:
+            file_info['updated_datetime'] = file_version
+        with tempfile.NamedTemporaryFile() as jsonFile:
+            with open(jsonFile.name, 'w') as fh:
+                json.dump(json_contents, fh)
+            yield jsonFile.name
+
+    def _load_file(self, tmp_json):
+        """run the load script and clean up after ourselves"""
+        # upload the data bundle to the DSS
+        args = ['--no-dry-run',
+                '--dss-endpoint',
+                f'{self.dss_endpoint}',
+                '--staging-bucket',
+                f'{self.staging_bucket}',
+                'gen3',
+                '--json-input-file',
+                f'{tmp_json}']
+        main(args)
+
+    def test_gen3_input_format_loading_from_cli(self):
+        self._test_gen3_input_format_loading_from_cli(self.test_files[0])
+
+    def test_gen3_input_format2_loading_from_cli(self):
+        self._test_gen3_input_format_loading_from_cli(self.test_files[1])
 
     @ignore_resource_warnings
-    def test_gen3_input_format_loading_from_cli(self, sample_input='/tests/test_data/gen3_sample_input.json'):
+    def _test_gen3_input_format_loading_from_cli(self, test_json):
         """
         Test that a gen3 formatted json can be uploaded to the DSS, and that all of
         the files loaded are only loaded by reference (and also are not indexed).
@@ -48,64 +89,45 @@ class TestGen3InputFormatLoading(unittest.TestCase):
         5. Assert files are loaded by reference (and also are not indexed).
         6. Assert that the new 'did' for the first file in the bundle was found in the results.
         """
-        # gen3 json template to use
-        json_input_file = f'{self.project_path}' + sample_input
-        # modified json_input_file with the template 'bundle_did' overwritten to a fresh one
-        tmp_json = f'{self.project_path}/tests/test_data/tmp.json'
-
         # mint a new 'bundle_did'
         guid = str(uuid.uuid4())
         # make new guid for first file
         file_guid = str(uuid.uuid4())
+        # we want a new version of the file to be uploaded
+        file_version = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        self._test_gen3_loading(test_json, guid, file_guid, file_version)
 
-        # copy the contents of json_input_file to tmp_json
-        # but change 'bundle_did' to a new guid
-        with open(json_input_file, 'r') as jsonFile:
-            json_contents = json.load(jsonFile)
-        json_contents[0]['bundle_did'] = guid
-        json_contents[0]['manifest'][0]['did'] = file_guid
-        with open(tmp_json, 'w') as jsonFile:
-            json.dump(json_contents, jsonFile)
+        # test that uploading again will be handled successfully
+        guid = str(uuid.uuid4())
+        self._test_gen3_loading(test_json, guid, file_guid, file_version)
 
-        # search for the newly minted guid in the DSS to make sure it does not exist yet
+    def _test_gen3_loading(self, test_json, guid, file_guid, file_version):
+        # search for the guid in the DSS to make sure it does not exist yet
         res = self.client.post_search(es_query={'query': {'term': {'uuid': guid}}}, replica='aws')
         assert res['total_hits'] == 0
 
-        # upload the data bundle to the DSS
-        args = ['--no-dry-run',
-                '--dss-endpoint',
-                f'{self.dss_endpoint}',
-                '--staging-bucket',
-                f'{self.staging_bucket}',
-                'gen3',
-                '--json-input-file',
-                f'{tmp_json}']
-        main(args)
+        with self._tmp_json_file(test_json, guid, file_guid, file_version) as tmp_json:
+            self._load_file(tmp_json)
+            time.sleep(5)  # there is some lag in uploading
 
-        time.sleep(5) # there is some lag in uploading
+            # search for the guid in the DSS and make sure it now exists and uploading was successful
+            res = self.client.post_search(es_query={'query': {'term': {'uuid': guid}}}, replica='aws')
+            assert res['total_hits'] > 0
 
-        # search for the newly minted guid in the DSS and make sure it now exists and uploading was successful
-        res = self.client.post_search(es_query={'query': {'term': {'uuid': guid}}}, replica='aws')
-        assert res['total_hits'] > 0
+            # verify that all of the results (except metadata.json) are file references and not indexed
+            found_matching_file = False
+            for r in res['results']:
+                response = requests.get(r['bundle_url'])
+                returned_json = response.json()
+                for f in returned_json['bundle']['files']:
+                    if f['name'] != 'metadata.json':
+                        assert f['indexed'] is False
+                        assert 'dss-type=fileref' in f['content-type']
 
-        # verify that all of the results (except metadata.json) are file references and not indexed
-        found_matching_file = False
-        for r in res['results']:
-            response = requests.get(r['bundle_url'])
-            returned_json = response.json()
-            for f in returned_json['bundle']['files']:
-                if f['name'] != 'metadata.json':
-                    assert f['indexed'] is False
-                    assert 'dss-type=fileref' in f['content-type']
-
-                    # verify that the file guid is stored
-                    file_ref_json = self.client.get_file(uuid=f['uuid'], version=f['version'], replica='aws')
-                    found_matching_file = found_matching_file or file_ref_json['aliases'][0] == file_guid
-        assert found_matching_file
-        os.remove(tmp_json)
-
-    def test_gen3_input2_format_loading_from_cli(self):
-        self.test_gen3_input_format_loading_from_cli(sample_input='/tests/test_data/gen3_sample_input2.json')
+                        # verify that the file guid is stored
+                        file_ref_json = self.client.get_file(uuid=f['uuid'], version=f['version'], replica='aws')
+                        found_matching_file = found_matching_file or file_ref_json['aliases'][0] == file_guid
+            assert found_matching_file
 
     def test_guid_missing(self):
         '''
