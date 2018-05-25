@@ -112,7 +112,7 @@ def bundle_to_flat(bundle):
     alignment['md5sum'] = alignment_metadata['md5sum']
     alignment['size'] = alignment_metadata['file_size']
     alignment['did'] = alignment_indexd['did']
-    index['gsurl'] = next(filter(lambda x: 'gs://' in x, alignment_indexd['urls']))
+    index['gsurl'] = next(filter(lambda x: 'gs://' in x, index_indexd['urls']))
     index['s3url'] = next(filter(lambda x: 's3://' in x, index_indexd['urls']))
     index['dosurl'] = "{}/{}".format(dos_base, index_indexd['did'])
     index['name'] = index_metadata['file_name']
