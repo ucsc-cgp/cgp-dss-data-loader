@@ -1,3 +1,5 @@
+import uuid
+
 import dcp_analysis_functions as dcp
 import json
 import requests
@@ -313,11 +315,12 @@ def make_bundles():
 
 
 def write_bundles_to_files(bundles, filename):
-    json_bundles = [{
-        'core_metadata': b[0],
-        'aliquot': b[1],
-        'sample': b[2],
-        'manifest': [b[3], b[4]]} for b in bundles]
+    json_bundles = [{'bundle_did': str(uuid.uuid4()),
+                     'core_metadata': b[0],
+                     'aliquot': b[1],
+                     'sample': b[2],
+                     'manifest': [b[3], b[4]]}
+                    for b in bundles]
 
     with open(filename, 'w') as outfile:
         json.dump(json_bundles, outfile)
