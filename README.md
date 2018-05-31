@@ -4,7 +4,7 @@ Simple data loader for CGP HCA Data Store
 ## Common Setup
 Run:
 
-`pip install -r requirements.txt
+`pip install -r requirements.txt`
 
 ## Setup for Development
 Run:
