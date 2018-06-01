@@ -415,13 +415,3 @@ class MetadataFileUploader:
     def load_dict(self, metadata: dict, filename: str, schema_url: str, bundle_uuid: str) -> tuple:
         metadata['describedBy'] = schema_url
         return self.dss_uploader.upload_dict_as_file(metadata, filename, str(uuid.uuid4()), bundle_uuid)
-
-def load_json_from_file(input_file_path: str) -> dict:
-    with open(input_file_path) as fh:
-        return json.load(fh)
-
-def suppress_verbose_logging():
-    for logger_name in logging.Logger.manager.loggerDict:  # type: ignore
-        if (logger_name.startswith("botocore") or
-                logger_name.startswith("boto3.resources")):
-            logging.getLogger(logger_name).setLevel(logging.WARNING)

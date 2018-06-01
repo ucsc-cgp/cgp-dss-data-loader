@@ -5,9 +5,8 @@ Script to load files and bundles into the HCA DSS.
 """
 
 import logging
-import sys
-
 import os
+import sys
 
 pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))  # noqa
 sys.path.insert(0, pkg_root)  # noqa
@@ -15,6 +14,7 @@ sys.path.insert(0, pkg_root)  # noqa
 from loader import base_loader
 from loader.basic_loader import BasicFormatBundleUploader
 from loader.gen3_loader import Gen3FormatBundleUploader
+from util import load_json_from_file, suppress_verbose_logging
 
 DSS_ENDPOINT_DEFAULT = "https://commons-dss.ucsc-cgp-dev.org/v1"
 STAGING_BUCKET_DEFAULT = "commons-dss-upload"
@@ -59,15 +59,15 @@ def main(argv):
 
     if options.input_format == "basic":
         bundle_uploader = BasicFormatBundleUploader(dss_uploader, metadata_file_uploader)
-        bundle_uploader.load_all_bundles(base_loader.load_json_from_file(options.json_input_file))
+        bundle_uploader.load_all_bundles(load_json_from_file(options.json_input_file))
     elif options.input_format == "gen3":
         bundle_uploader = Gen3FormatBundleUploader(dss_uploader, metadata_file_uploader)
-        bundle_uploader.load_all_bundles(base_loader.load_json_from_file(options.json_input_file))
+        bundle_uploader.load_all_bundles(load_json_from_file(options.json_input_file))
 
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.INFO)
-    base_loader.suppress_verbose_logging()
+    suppress_verbose_logging()
     main(sys.argv[1:])
