@@ -13,11 +13,12 @@ from loader.basic_loader import BasicFormatBundleUploader
 from loader.gen3_loader import Gen3FormatBundleUploader
 
 DSS_ENDPOINT_DEFAULT = "https://commons-dss.ucsc-cgp-dev.org/v1"
-STAGING_BUCKET_DEFAULT = "commons-dss-staging"
+STAGING_BUCKET_DEFAULT = "commons-dss-upload"
 
 # Google Cloud Access
 # TODO Make GOOGLE_PROJECT_ID configurable via a command-line option
 GOOGLE_PROJECT_ID = "platform-dev-178517"  # For requester pays buckets
+
 
 def main(argv):
     import argparse
