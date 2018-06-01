@@ -19,11 +19,6 @@ STAGING_BUCKET_DEFAULT = "commons-dss-staging"
 # TODO Make GOOGLE_PROJECT_ID configurable via a command-line option
 GOOGLE_PROJECT_ID = "platform-dev-178517"  # For requester pays buckets
 
-# TODO Get the schema URL from the input data
-SCHEMA_URL_DEFAULT = ("https://raw.githubusercontent.com/DataBiosphere/commons-sample-data/master"
-                      "/json_schema/spinnaker_metadata/1.2.1/spinnaker_metadata_schema.json")
-
-
 def main(argv):
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
