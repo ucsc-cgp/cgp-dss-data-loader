@@ -11,7 +11,7 @@ from pathlib import Path
 import hca
 import requests
 
-from tests import eventually, ignore_resource_warnings
+from tests import eventually, ignore_resource_warnings, message
 
 from scripts.cgp_data_loader import main as cgp_data_loader_main
 
@@ -78,6 +78,8 @@ class TestGen3InputFormatLoading(unittest.TestCase):
         5. Assert data files are loaded by reference and set to not be indexed.
         6. Assert that the new 'did' for the first file in the bundle was found in the results.
         """
+
+        message("Test that initial loading works successfully")
         # mint a new 'bundle_did'
         guid = str(uuid.uuid4())
         # make new guid for first file
@@ -86,7 +88,7 @@ class TestGen3InputFormatLoading(unittest.TestCase):
         file_version = datetime.datetime.now(datetime.timezone.utc).isoformat()
         self._test_gen3_loading(test_json, guid, file_guid, file_version)
 
-        # test that uploading again will be handled successfully
+        message("Test that uploading again will be handled successfully")
         guid = str(uuid.uuid4())
         self._test_gen3_loading(test_json, guid, file_guid, file_version)
 
@@ -99,17 +101,20 @@ class TestGen3InputFormatLoading(unittest.TestCase):
             assert search_results['total_hits'] > 0
             return search_results
 
-        # search for the bundle uuid in the DSS to make sure it does not exist yet
+        message("Search for the bundle uuid in the DSS to make sure it does not exist yet")
         search_results = self.dss_client.post_search(es_query={'query': {'term': {'uuid': bundle_guid}}}, replica='aws')
         assert search_results['total_hits'] == 0
 
+        message("Prepare test input file to load")
         with self._tmp_json_file(test_json, bundle_guid, file_guid, file_version) as tmp_json:
+            message("Load the test input file")
             self._load_file(tmp_json)
 
+            message("Wait for newly loaded bundle to appear in search results")
             search_results = _search_for_bundle(bundle_guid)
 
-            # verify that all of the results (except metadata.json) are file references and
-            # set to not be indexed
+            message("Verify that all of the results (except metadata.json) are file references "
+                    "and set to not be indexed")
             found_matching_file = False
             for r in search_results['results']:
                 response = requests.get(r['bundle_url'])
@@ -119,7 +124,7 @@ class TestGen3InputFormatLoading(unittest.TestCase):
                         assert f['indexed'] is False
                         assert 'dss-type=fileref' in f['content-type']
 
-                        # verify that the file guid is stored
+                        message("Verify that the file guid is stored")
                         file_ref_json = self.dss_client.get_file(uuid=f['uuid'], version=f['version'], replica='aws')
                         found_matching_file = found_matching_file or file_ref_json['aliases'][0] == file_guid
             assert found_matching_file
