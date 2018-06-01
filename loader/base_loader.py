@@ -48,11 +48,16 @@ class DssUploader:
         Functions for uploading files to a given DSS.
 
         :param dss_endpoint: The URL to a Swagger DSS API.  e.g. "https://commons-dss.ucsc-cgp-dev.org/v1"
-        :param staging_bucket: Base name of an s3 bucket.  e.g. 'mbaumann-dss-staging'
-        :param google_project_id: A google "Project ID", link is:
-                                  https://console.cloud.google.com/cloud-resource-manager
-                                  e.g. "platform-dev-178517"
-        :param dry_run: True or False
+        :param staging_bucket: The name of the AWS S3 bucket to be used when staging files for uploading
+        to the DSS. As an example, local files are uploaded to the staging bucket, then file metadata tags
+        required by the DSS are assigned to it, then the file is loaded into the DSS (by copy).
+        The bucket must be accessible by the DSS. .e.g. 'commons-dss-upload'
+        :param google_project_id: A Google `Project ID` to be used when accessing GCP requester pays buckets.
+        e.g. "platform-dev-178517"
+        One way to find a `Project ID` is provided here:
+        https://console.cloud.google.com/cloud-resource-manager
+        :param dry_run: If True, log the actions that would be performed yet don't actually execute them.
+        Otherwise, actually perform the operations.
         """
         self.dss_endpoint = dss_endpoint
         self.staging_bucket = staging_bucket
@@ -67,14 +72,25 @@ class DssUploader:
 
     def upload_cloud_file(self, bucket: str, key: str, bundle_uuid: str, file_uuid: str) -> tuple:
         """
-        Upload a file contained in an s3 bucket into a given DSS.
+        Upload a file contained in an S3 bucket into a given DSS by copy.
+        If the given cloud file does not have the file metadata tags required
+        by the DSS, checksums for the file are calculated and tagged to the
+        source file in place. Then the file is uploaded to the DSS by copy.
+
+        This differs from the typical practice of copying the source cloud file
+        to a staging bucket, tagging the file there, then uploading it to the DSS.
+        This method was provided for use case of loading large (e.g. 20GB) data files,
+        from a bucket in which the caller has permission to assign tags, into the DSS by copy.
+        This was the scenario when originally loading the TOPMed 107 open access files
+        into the DSS by copy. This method should not be used for loading large datasets
+        from controlled access buckets.
 
         NOTE: S3 ONLY!
 
-        :param bucket: Base name of an s3 bucket.  e.g. 'mbaumann-dss-staging'
-        :param key: s3 file to upload.  e.g. 'output.txt' or 'data/output.txt'
-        :param bundle_uuid: A uuid.uuid4() format hash.
-        :param file_uuid: A uuid.uuid4() format hash.
+        :param bucket: Name of an S3 bucket containing the cloud file to be loaded.
+        :param key: S3 file to upload.  e.g. 'output.txt' or 'data/output.txt'
+        :param bundle_uuid: An RFC4122-compliant UUID to be used to identify the bundle containing the file
+        :param file_uuid: An RFC4122-compliant UUID to be used to identify the file
         :return: file_uuid: str, file_version: str, filename: str
         """
         if not self._has_hca_tags(self.blobstore, bucket, key):
@@ -90,14 +106,26 @@ class DssUploader:
                                        guid: str,
                                        file_version: str=None) -> tuple:
         """
-        Takes a file's metadata, formats it as a dictionary, and uploads this dictionary as a json file to the DSS.
+        Loads the given cloud file into the DSS by reference, rather than by copying it into the DSS.
+        Because the HCA DSS per se does not support loading by reference, this is currently implemented
+        using the approach described here:
+        https://docs.google.com/document/d/1QSa7Ubw-muyD_u0X_dq9WeKyK_dCJXi4Ex7S_pil1uk/edit#heading=h.exnqjy2n2q78
 
-        :param filename: The basename of the file in the bucket.
-        :param file_uuid: A uuid.uuid4() format hash.
+        This is conceptually similar to creating a "symbolic link" to the cloud file rather than copying the
+        source file into the DSS.
+        The file's metadata is obtained, formatted as a dictionary, then this dictionary is uploaded as
+        as a json file with content type `dss-type=fileref` into the DSS.
+
+        A request has been made for the HCA data-store to support loading by reference as a feature of the
+        data store, here: https://github.com/HumanCellAtlas/data-store/issues/912
+
+        :param filename: The name of the file in the bucket.
+        :param file_uuid: An RFC4122-compliant UUID to be used to identify the file
         :param file_cloud_urls: A set of 'gs://' and 's3://' bucket links.
                                 e.g. {'gs://broad-public-datasets/g.bam', 's3://ucsc-topmed-datasets/a.bam'}
-        :param bundle_uuid: A uuid.uuid4() format hash.
-        :param guid: A uuid.uuid4() format hash.
+        :param bundle_uuid: n RFC4122-compliant UUID to be used to identify the bundle containing the file
+        :param guid: An optional additional/alternate data identifier/alias to associate with the file
+        e.g. "dg.4503/887388d7-a974-4259-86af-f5305172363d"
         :param file_version: a RFC3339 compliant datetime string
         :return: file_uuid: str, file_version: str, filename: str
         """
@@ -114,11 +142,14 @@ class DssUploader:
 
     def _create_file_reference(self, file_cloud_urls: set, guid: str) -> dict:
         """
-        Format a file's metadata into a dictionary for uploading as a json.
+        Format a file's metadata into a dictionary for uploading as a json to support the approach
+        described here:
+        https://docs.google.com/document/d/1QSa7Ubw-muyD_u0X_dq9WeKyK_dCJXi4Ex7S_pil1uk/edit#heading=h.exnqjy2n2q78
 
         :param file_cloud_urls: A set of 'gs://' and 's3://' bucket links.
                                 e.g. {'gs://broad-public-datasets/g.bam', 's3://ucsc-topmed-datasets/a.bam'}
-        :param guid: A uuid.uuid4() format hash.
+        :param guid: An optional additional/alternate data identifier/alias to associate with the file
+        e.g. "dg.4503/887388d7-a974-4259-86af-f5305172363d"
         :param file_version: RFC3339 formatted timestamp.
         :return: A dictionary of metadata values.
         """
@@ -138,10 +169,10 @@ class DssUploader:
 
     def _get_s3_file_metadata(self, bucket: str, key: str) -> dict:
         """
-        Format an s3 file's metadata into a dictionary for uploading as a json.
+        Format an S3 file's metadata into a dictionary for uploading as a json.
 
-        :param bucket: Base name of an s3 bucket.  e.g. 'mbaumann-dss-staging'
-        :param key: s3 file to upload.  e.g. 'output.txt' or 'data/output.txt'
+        :param bucket: Name of an S3 bucket
+        :param key: S3 file to upload.  e.g. 'output.txt' or 'data/output.txt'
         :return: A dictionary of metadata values.
         """
         metadata = dict()
@@ -156,10 +187,10 @@ class DssUploader:
 
     def _get_gs_file_metadata(self, bucket: str, key: str) -> dict:
         """
-        Format a gs file's metadata into a dictionary for uploading as a json.
+        Format a GS file's metadata into a dictionary for uploading as a JSON file.
 
-        :param bucket: Base name of a google bucket.  e.g. 'mbaumann-dss-staging'
-        :param key: gs file to upload.  e.g. 'output.txt' or 'data/output.txt'
+        :param bucket: Name of a GS bucket.
+        :param key: GS file to upload.  e.g. 'output.txt' or 'data/output.txt'
         :return: A dictionary of metadata values.
         """
         metadata = dict()
@@ -179,15 +210,16 @@ class DssUploader:
                               gs_metadata: Optional[Dict[str, Any]],
                               guid: str) -> dict:
         """
-        Creates a dictionary concordant with the swagger json specification in
-        preparation to uploading to the DSS.
+        Consolidates cloud file metadata to create the JSON used to load by reference
+        into the DSS.
 
-        :param file_cloud_urls: A set of 'gs://' and 's3://' bucket links.
+        :param file_cloud_urls: A set of 'gs://' and 's3://' bucket URLs.
                                 e.g. {'gs://broad-public-datasets/g.bam', 's3://ucsc-topmed-datasets/a.bam'}
         :param s3_metadata: Dictionary of meta data produced by _get_s3_file_metadata().
         :param gs_metadata: Dictionary of meta data produced by _get_gs_file_metadata().
-        :param guid: A uuid.uuid4() format hash.
-        :return: A dictionary of metadata values.
+        :param guid: An optional additional/alternate data identifier/alias to associate with the file
+        e.g. "dg.4503/887388d7-a974-4259-86af-f5305172363d"
+        :return: A dictionary of cloud file metadata values
         """
         consolidated_metadata = dict()
         if s3_metadata:
@@ -206,13 +238,13 @@ class DssUploader:
                             file_version: str=None,  # RFC3339
                             content_type=None):
         """
-        Upload a dictionary representing a file's metadata as a json to the DSS.
+        Create a JSON file in the DSS containing the given dict.
 
-        :param value: A dictionary of metadata values.
+        :param value: A dictionary representing the JSON content of the file to be created.
         :param filename: The basename of the file in the bucket.
-        :param file_uuid: A uuid.uuid4() format hash.
-        :param bundle_uuid: A uuid.uuid4() format hash.
-        :param content_type: Content description, for example: "application/json; dss-type=fileref".
+        :param file_uuid: An RFC4122-compliant UUID to be used to identify the file
+        :param An RFC4122-compliant UUID to be used to identify the bundle containing the file
+        :param content_type: Content description e.g. "application/json; dss-type=fileref".
         :param file_version: a RFC3339 compliant datetime string
         :return: file_uuid: str, file_version: str, filename: str
         """
@@ -235,12 +267,12 @@ class DssUploader:
                           file_version: str=None,
                           content_type=None):
         """
-        Upload file to the DSS.
+        Upload a file from the local file system to the DSS.
 
         :param path: Path to a local file.
-        :param file_uuid: A uuid.uuid4() format hash.
-        :param bundle_uuid: A uuid.uuid4() format hash.
-        :param content_type: Content description, for example: "application/json; dss-type=fileref".
+        :param file_uuid: An RFC4122-compliant UUID to be used to identify the file
+        :param bundle_uuid: An RFC4122-compliant UUID to be used to identify the bundle containing the file
+        :param content_type: Content type identifier, for example: "application/json; dss-type=fileref".
         :param file_version: a RFC3339 compliant datetime string
         :return: file_uuid: str, file_version: str, filename: str
         """
@@ -253,11 +285,11 @@ class DssUploader:
 
     def load_bundle(self, file_info_list: list, bundle_uuid: str):
         """
-        Loads a bundle to the DSS.
+        Loads a bundle to the DSS that contains the specified files.
 
         :param file_info_list:
-        :param bundle_uuid: A uuid.uuid4() format hash.
-        :return: A string representing: "{bundle_uuid}.{version}"
+        :param bundle_uuid: An RFC4122-compliant UUID to be used to identify the bundle containing the file
+        :return: A full qualified bundle id e.g. "{bundle_uuid}.{version}"
         """
         kwargs = dict(replica="aws", creator_uid=CREATOR_ID, files=file_info_list, uuid=bundle_uuid)
         if not self.dry_run:
@@ -277,10 +309,11 @@ class DssUploader:
 
     def _upload_local_file_to_staging(self, path: str, file_uuid: str, content_type):
         """
-        Uploads a local file to an s3 bucket.
+        Uploads a local file to the (S3) staging bucket then tags the file with the checksum
+        values required to load into the DSS.
 
         :param path: Path to a local file.
-        :param file_uuid: A uuid.uuid4() format hash.
+        :param file_uuid: An RFC4122-compliant UUID to be used to identify the file.
         :param content_type: Content description, for example: "application/json; dss-type=fileref".
         :return: file_uuid: str, key_name: str
         """
@@ -291,14 +324,14 @@ class DssUploader:
     @staticmethod
     def _has_hca_tags(blobstore: BlobStore, bucket: str, key: str) -> bool:
         """
-        Return True if any of the following tags are found:
+        Return True if all of the following tags are found:
             "hca-dss-s3_etag"
             "hca-dss-sha1"
             "hca-dss-sha256"
             "hca-dss-crc32c"
 
         :param blobstore: cloud.blobstore.BlobStore
-        :param bucket: Base name of an s3 bucket.  e.g. 'mbaumann-dss-staging'
+        :param bucket: Name of an S3 bucket.  e.g. 'commons-dss-upload'
         :param key: s3 file to upload.  e.g. 'output.txt' or 'data/output.txt'
         :return: bool
         """
@@ -309,12 +342,12 @@ class DssUploader:
     @staticmethod
     def _calculate_checksums(s3_client, bucket: str, key: str) -> typing.Dict:
         """
-        Creates checksums for a file in an s3 bucket.
+        Creates checksums for a file in an S3 bucket.
 
         :param s3_client: An instance of boto3.client("s3").
-        :param bucket: Base name of an s3 bucket.  e.g. 'mbaumann-dss-staging'
+        :param bucket: Name of an s3 bucket.  e.g. 'commons-dss-upload'
         :param key: s3 file to upload.  e.g. 'output.txt' or 'data/output.txt'
-        :return: A dictionary of checksums.
+        :return: A dictionary of checksums
         """
         checksumming_sink = ChecksummingSink()
         tx_cfg = TransferConfig(multipart_threshold=S3Etag.etag_stride,
@@ -324,11 +357,11 @@ class DssUploader:
 
     def _set_hca_metadata_tags(self, s3_client, bucket: str, key: str, checksums: dict) -> None:
         """
-        Sets checksums for each hca metadata tag for a file.
+        Sets an HCA file metadata tag for each of the required checksums.
 
         :param s3_client: An instance of boto3.client("s3").
-        :param bucket: Base name of an s3 bucket.  e.g. 'mbaumann-dss-staging'
-        :param key: s3 file to upload.  e.g. 'output.txt' or 'data/output.txt'
+        :param bucket: Name of an S3 bucket.  e.g. 'commons-dss-upload'
+        :param key: S3 file to upload.  e.g. 'output.txt' or 'data/output.txt'
         :param checksums: A dictionary of checksums.
         """
         metadata = {
@@ -346,15 +379,16 @@ class DssUploader:
                                          source_key: str,
                                          file_uuid: str,
                                          bundle_uuid: str,
-                                         file_version: str=None,  # should be RFC3339
+                                         file_version: str=None,
                                          timeout_seconds=1200):
         """
         Uploads a tagged file contained in a cloud bucket to the DSS.
 
-        :param source_bucket: Base name of an s3 bucket.  e.g. 'mbaumann-dss-staging'
-        :param source_key: s3 file to upload.  e.g. 'output.txt' or 'data/output.txt'
-        :param file_uuid: A uuid.uuid4() format hash.
-        :param bundle_uuid: A uuid.uuid4() format hash.
+        :param source_bucket: Name of an S3 bucket.  e.g. 'commons-dss-upload'
+        :param source_key: S3 file to upload.  e.g. 'output.txt' or 'data/output.txt'
+        :param file_uuid: An RFC4122-compliant UUID to be used to identify the file.
+        :param bundle_uuid: An RFC4122-compliant UUID to be used to identify the bundle containing the file
+        :param file_version: a RFC3339 compliant datetime string
         :param timeout_seconds:  Amount of time to continue attempting an async copy.
         :return: file_uuid: str, file_version: str, filename: str
         """

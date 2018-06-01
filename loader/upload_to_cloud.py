@@ -1,9 +1,8 @@
-#!/usr/bin/env python3.6
-
 """
-Run "pip install crcmod python-magic boto3" to install this script's dependencies.
+Utility functions for uploading a file to a staging bucket in preparation
+for loading into the HCA DSS.
 
-Copied and modified from GitHub Human Cell Atlas dcp-cli/hca/dss/upload_to_cloud.py
+Leveraged from GitHub Human Cell Atlas dcp-cli/hca/dss/upload_to_cloud.py
 """
 import logging
 import mimetypes
@@ -53,13 +52,16 @@ def _copy_from_s3(path, s3, tx_cfg):
 
 def upload_to_cloud(file_handle, file_uuid, staging_bucket, content_type=None):
     """
-    Upload a file to cloud.
+    Upload a file to the staging bucket, computing the DSS-required checksums
+    in the process, then tag the file in the staging bucket with the checksums.
+    This is in preparation from subsequently uploading the file from the staging
+    bucket into the DSS.
 
-    :param file_handle: file handle to be uploaded.
-    :param file_uuid: uuid to be used when uploading the file
+    :param file_handle: File handle for file to be uploaded.
+    :param file_uuid: An RFC4122-compliant UUID to be used to identify the file
     :param staging_bucket: The aws bucket to upload the files to.
-    :param content_type: the type of content in for format returned by _mime_type()
-    :return: a list of each file's unique key name.
+    :param content_type: The type of content in the file, in the format returned by _mime_type()
+    :return: a tuple of the file_uuid and key
     """
     tx_cfg = TransferConfig(multipart_threshold=S3Etag.etag_stride,
                             multipart_chunksize=S3Etag.etag_stride)
