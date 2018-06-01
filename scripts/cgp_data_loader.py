@@ -12,7 +12,7 @@ pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))  # noq
 sys.path.insert(0, pkg_root)  # noqa
 
 from loader import base_loader
-from loader.basic_loader import BasicFormatBundleUploader
+from loader.standard_loader import StandardFormatBundleUploader
 from loader.gen3_loader import Gen3FormatBundleUploader
 from util import load_json_from_file, suppress_verbose_logging
 
@@ -40,9 +40,9 @@ def main(argv):
                         help="Bucket to stage local files for uploading to DSS")
 
     subparsers = parser.add_subparsers(dest='input_format', help='Input file format')
-    input_format = subparsers.add_parser("basic", help='"Basic" CGP DSS input file format')
+    input_format = subparsers.add_parser("standard", help='Standard CGP DSS input file format')
     input_format.add_argument("--json-input-file", metavar="JSON_INPUT_FILE", required=True,
-                              help="Path to the basic JSON format input file")
+                              help="Path to the standard JSON format input file")
     input_format = subparsers.add_parser("gen3", help='University of Chicago Gen3 input file format')
     input_format.add_argument("--json-input-file", metavar="JSON_INPUT_FILE", required=True,
                               help="Path to the Gen3 JSON format input file")
@@ -57,8 +57,8 @@ def main(argv):
                                            GOOGLE_PROJECT_ID, options.dry_run)
     metadata_file_uploader = base_loader.MetadataFileUploader(dss_uploader)
 
-    if options.input_format == "basic":
-        bundle_uploader = BasicFormatBundleUploader(dss_uploader, metadata_file_uploader)
+    if options.input_format == "standard":
+        bundle_uploader = StandardFormatBundleUploader(dss_uploader, metadata_file_uploader)
         bundle_uploader.load_all_bundles(load_json_from_file(options.json_input_file))
     elif options.input_format == "gen3":
         bundle_uploader = Gen3FormatBundleUploader(dss_uploader, metadata_file_uploader)
