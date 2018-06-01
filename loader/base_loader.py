@@ -19,7 +19,6 @@ import logging
 import mimetypes
 import os
 import time
-import typing
 import uuid
 from io import open
 from tempfile import mkdtemp
@@ -30,8 +29,8 @@ import boto3
 import botocore
 import requests
 from boto3.s3.transfer import TransferConfig
-from cloud_blobstore import BlobStore, s3
-from dcplib.checksumming_io import ChecksummingBufferedReader, ChecksummingSink, S3Etag
+from cloud_blobstore import s3
+from dcplib.checksumming_io import ChecksummingBufferedReader, S3Etag
 from google.cloud.storage import Client
 from hca.dss import DSSClient
 from hca.util import SwaggerAPIException
@@ -68,34 +67,6 @@ class DssUploader:
         os.environ.pop('HCA_CONFIG_FILE', None)
         self.dss_client = DSSClient()
         self.dss_client.host = self.dss_endpoint
-
-    def upload_cloud_file(self, bucket: str, key: str, bundle_uuid: str, file_uuid: str) -> tuple:
-        """
-        Upload a file contained in an S3 bucket into a given DSS by copy.
-        If the given cloud file does not have the file metadata tags required
-        by the DSS, checksums for the file are calculated and tagged to the
-        source file in place. Then the file is uploaded to the DSS by copy.
-
-        This differs from the typical practice of copying the source cloud file
-        to a staging bucket, tagging the file there, then uploading it to the DSS.
-        This method was provided for use case of loading large (e.g. 20GB) data files,
-        from a bucket in which the caller has permission to assign tags, into the DSS by copy.
-        This was the scenario when originally loading the TOPMed 107 open access files
-        into the DSS by copy. This method should not be used for loading large datasets
-        from controlled access buckets.
-
-        NOTE: S3 ONLY!
-
-        :param bucket: Name of an S3 bucket containing the cloud file to be loaded.
-        :param key: S3 file to upload.  e.g. 'output.txt' or 'data/output.txt'
-        :param bundle_uuid: An RFC4122-compliant UUID to be used to identify the bundle containing the file
-        :param file_uuid: An RFC4122-compliant UUID to be used to identify the file
-        :return: file_uuid: str, file_version: str, filename: str
-        """
-        if not self._has_hca_tags(self.blobstore, bucket, key):
-            checksums = self._calculate_checksums(self.s3_client, bucket, key)
-            self._set_hca_metadata_tags(self.s3_client, bucket, key, checksums)
-        return self._upload_tagged_cloud_file_to_dss(bucket, key, file_uuid, bundle_uuid)
 
     def upload_cloud_file_by_reference(self,
                                        filename: str,
@@ -359,60 +330,6 @@ class DssUploader:
         if type_:
             return type_
         return "application/octet-stream"
-
-    @staticmethod
-    def _has_hca_tags(blobstore: BlobStore, bucket: str, key: str) -> bool:
-        """
-        Return True if all of the following tags are found:
-            "hca-dss-s3_etag"
-            "hca-dss-sha1"
-            "hca-dss-sha256"
-            "hca-dss-crc32c"
-
-        :param blobstore: cloud.blobstore.BlobStore
-        :param bucket: Name of an S3 bucket.  e.g. 'commons-dss-upload'
-        :param key: s3 file to upload.  e.g. 'output.txt' or 'data/output.txt'
-        :return: bool
-        """
-        hca_tag_names = {"hca-dss-s3_etag", "hca-dss-sha1", "hca-dss-sha256", "hca-dss-crc32c"}
-        metadata = blobstore.get_user_metadata(bucket, key)
-        return hca_tag_names.issubset(metadata.keys())
-
-    @staticmethod
-    def _calculate_checksums(s3_client, bucket: str, key: str) -> typing.Dict:
-        """
-        Creates checksums for a file in an S3 bucket.
-
-        :param s3_client: An instance of boto3.client("s3").
-        :param bucket: Name of an s3 bucket.  e.g. 'commons-dss-upload'
-        :param key: s3 file to upload.  e.g. 'output.txt' or 'data/output.txt'
-        :return: A dictionary of checksums
-        """
-        checksumming_sink = ChecksummingSink()
-        tx_cfg = TransferConfig(multipart_threshold=S3Etag.etag_stride,
-                                multipart_chunksize=S3Etag.etag_stride)
-        s3_client.download_fileobj(bucket, key, checksumming_sink, Config=tx_cfg)
-        return checksumming_sink.get_checksums()
-
-    def _set_hca_metadata_tags(self, s3_client, bucket: str, key: str, checksums: dict) -> None:
-        """
-        Sets an HCA file metadata tag for each of the required checksums.
-
-        :param s3_client: An instance of boto3.client("s3").
-        :param bucket: Name of an S3 bucket.  e.g. 'commons-dss-upload'
-        :param key: S3 file to upload.  e.g. 'output.txt' or 'data/output.txt'
-        :param checksums: A dictionary of checksums.
-        """
-        metadata = {
-            "hca-dss-s3_etag": checksums["s3_etag"],
-            "hca-dss-sha1": checksums["sha1"],
-            "hca-dss-sha256": checksums["sha256"],
-            "hca-dss-crc32c": checksums["crc32c"]
-        }
-        s3_client.put_object_tagging(Bucket=bucket,
-                                     Key=key,
-                                     Tagging=dict(TagSet=self._encode_tags(metadata))
-                                     )
 
     def _upload_tagged_cloud_file_to_dss(self, source_bucket: str,
                                          source_key: str,
