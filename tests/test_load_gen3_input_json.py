@@ -11,7 +11,7 @@ from pathlib import Path
 import hca
 import requests
 
-from tests import ignore_resource_warnings
+from tests import eventually, ignore_resource_warnings
 
 from scripts.cgp_data_loader import main as cgp_data_loader_main
 
@@ -91,22 +91,27 @@ class TestGen3InputFormatLoading(unittest.TestCase):
         self._test_gen3_loading(test_json, guid, file_guid, file_version)
 
     def _test_gen3_loading(self, test_json, bundle_guid, file_guid, file_version):
+
+        @eventually(timeout_seconds=5.0, retry_interval_seconds=1.0)
+        def _search_for_bundle(bundle_uuid):
+            # Search for the bundle uuid in the DSS and make sure it now exists and uploading was successful
+            search_results = self.dss_client.post_search(es_query={'query': {'term': {'uuid': bundle_uuid}}}, replica='aws')
+            assert search_results['total_hits'] > 0
+            return search_results
+
         # search for the bundle uuid in the DSS to make sure it does not exist yet
-        res = self.dss_client.post_search(es_query={'query': {'term': {'uuid': bundle_guid}}}, replica='aws')
-        assert res['total_hits'] == 0
+        search_results = self.dss_client.post_search(es_query={'query': {'term': {'uuid': bundle_guid}}}, replica='aws')
+        assert search_results['total_hits'] == 0
 
         with self._tmp_json_file(test_json, bundle_guid, file_guid, file_version) as tmp_json:
             self._load_file(tmp_json)
-            time.sleep(5)  # there is some lag in uploading
 
-            # Search for the bundle uuid in the DSS and make sure it now exists and uploading was successful
-            res = self.dss_client.post_search(es_query={'query': {'term': {'uuid': bundle_guid}}}, replica='aws')
-            assert res['total_hits'] > 0
+            search_results = _search_for_bundle(bundle_guid)
 
             # verify that all of the results (except metadata.json) are file references and
             # set to not be indexed
             found_matching_file = False
-            for r in res['results']:
+            for r in search_results['results']:
                 response = requests.get(r['bundle_url'])
                 returned_json = response.json()
                 for f in returned_json['bundle']['files']:
