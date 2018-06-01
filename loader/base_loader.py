@@ -16,6 +16,7 @@ import base64
 import binascii
 import json
 import logging
+import mimetypes
 import os
 import time
 import typing
@@ -30,12 +31,10 @@ import botocore
 import requests
 from boto3.s3.transfer import TransferConfig
 from cloud_blobstore import BlobStore, s3
-from dcplib.checksumming_io import ChecksummingSink, S3Etag
+from dcplib.checksumming_io import ChecksummingBufferedReader, ChecksummingSink, S3Etag
 from google.cloud.storage import Client
 from hca.dss import DSSClient
 from hca.util import SwaggerAPIException
-
-from .upload_to_cloud import upload_to_cloud, encode_tags
 
 logger = logging.getLogger(__name__)
 
@@ -309,17 +308,57 @@ class DssUploader:
 
     def _upload_local_file_to_staging(self, path: str, file_uuid: str, content_type):
         """
-        Uploads a local file to the (S3) staging bucket then tags the file with the checksum
-        values required to load into the DSS.
+        Upload a local file to the staging bucket, computing the DSS-required checksums
+        in the process, then tag the file in the staging bucket with the checksums.
+        This is in preparation from subsequently uploading the file from the staging
+        bucket into the DSS.
 
         :param path: Path to a local file.
         :param file_uuid: An RFC4122-compliant UUID to be used to identify the file.
         :param content_type: Content description, for example: "application/json; dss-type=fileref".
         :return: file_uuid: str, key_name: str
         """
-        with open(path, "rb") as fh:
-            file_uuid, key_name = upload_to_cloud(fh, file_uuid, self.staging_bucket, content_type)
+        tx_cfg = TransferConfig(multipart_threshold=S3Etag.etag_stride,
+                                multipart_chunksize=S3Etag.etag_stride)
+        s3 = boto3.resource("s3")
+
+        destination_bucket = s3.Bucket(self.staging_bucket)
+        with open(path, "rb") as file_handle, ChecksummingBufferedReader(file_handle) as fh:
+            key_name = "{}/{}".format(file_uuid, os.path.basename(fh.raw.name))
+            destination_bucket.upload_fileobj(
+                fh,
+                key_name,
+                Config=tx_cfg,
+                ExtraArgs={
+                    'ContentType': content_type if content_type is not None else self._mime_type(fh.raw.name)
+                }
+            )
+            sums = fh.get_checksums()
+            metadata = {
+                "hca-dss-s3_etag": sums["s3_etag"],
+                "hca-dss-sha1": sums["sha1"],
+                "hca-dss-sha256": sums["sha256"],
+                "hca-dss-crc32c": sums["crc32c"],
+            }
+
+            s3.meta.client.put_object_tagging(Bucket=destination_bucket.name,
+                                              Key=key_name,
+                                              Tagging=dict(TagSet=self._encode_tags(metadata))
+                                              )
         return file_uuid, key_name
+
+    @staticmethod
+    def _encode_tags(tags):
+        return [dict(Key=k, Value=v) for k, v in tags.items()]
+
+    @staticmethod
+    def _mime_type(filename):
+        type_, encoding = mimetypes.guess_type(filename)
+        if encoding:
+            return encoding
+        if type_:
+            return type_
+        return "application/octet-stream"
 
     @staticmethod
     def _has_hca_tags(blobstore: BlobStore, bucket: str, key: str) -> bool:
@@ -372,7 +411,7 @@ class DssUploader:
         }
         s3_client.put_object_tagging(Bucket=bucket,
                                      Key=key,
-                                     Tagging=dict(TagSet=encode_tags(metadata))
+                                     Tagging=dict(TagSet=self._encode_tags(metadata))
                                      )
 
     def _upload_tagged_cloud_file_to_dss(self, source_bucket: str,
