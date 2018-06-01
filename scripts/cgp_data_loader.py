@@ -1,5 +1,9 @@
 #!/usr/bin/env python
 
+"""
+Script to load files and bundles into the HCA DSS.
+"""
+
 import logging
 import sys
 
