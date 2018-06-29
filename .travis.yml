@@ -5,6 +5,13 @@ before_install:
 - openssl aes-256-cbc -K $encrypted_e70c9f59db9f_key -iv $encrypted_e70c9f59db9f_iv
   -in client-secret.json.enc -out client-secret.json -d
 install:
-- pip install -r requirements-dev.txt
+- make develop
 script:
 - make test
+deploy:
+  provider: pypi
+  on:
+    tags: true
+  user: jessebrennan
+  password:
+    secure: eBqClaTiltLnIC/lwqAqQQpi5Qrb3cpKn666JQPIYUA5Nn36SqLmX8QxrN1lqc9rbE/H1CufMhdwQPgpM7D5n7nQ0e4o0dXU2UsggIuEyaD4ZHliRveogbj6rrk+zrvqczZXkvNp22nefoi4ehk9wYhYQL1SAA4ytgsLJm0Svd1X/Gm6RmLuvafwKdsXwFkSm2ihJIMb7VPZa8vQ+EX0TMllX4on+6P5lQNmaCo/9pdocnM3HQTPJohZ2lx6EfUMLaX/gkC5akqqJ5MHCcbCNezJpP/MC0JibF08GDcwUy7zc79f0mIqc4rpbyqPWjZeuBUFrkwh67v8BRWcC7al3r1L7xbQRXpL00CbS2ySUNOfXgmV2M4UUUSgga4TdA28tUuP/lxgcS7tUT07ccSpo+RlD+8xLWs28oBsTJ+J7ebRrKAdTKu4X2Qts8LklxWbYIfIy2XELth+GpxR9mHaIoGDpV7E+wHSFqwGQekLMiZyuzDKKw/pG2taMq2EK6JnUO/470hc7FZf6gBIDlUMFFBffoArPrEhC4LdCwxqtAlG2Vy/UBAYqLMcTYgm7IGHQAwt1pHqMwHfb3pVsFbHyJ7vH7HJMknWHmx7yCXv+/pE6zTRNrANEPlhkVNrNAve++PIIZvBIY7K213SmUwxdmftfaxKaaAMj8xSpe6xrKk=

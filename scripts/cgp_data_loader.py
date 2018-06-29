@@ -24,7 +24,7 @@ STAGING_BUCKET_DEFAULT = "commons-dss-upload"
 GOOGLE_PROJECT_ID = "platform-dev-178517"  # For requester pays buckets
 
 
-def main(argv):
+def main(argv=sys.argv[1:]):
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
     dry_run_group = parser.add_mutually_exclusive_group(required=True)
@@ -74,4 +74,4 @@ def main(argv):
 
 
 if __name__ == '__main__':
-    main(sys.argv[1:])
+    main()

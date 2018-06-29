@@ -1,0 +1,2 @@
+include README.md VERSION release.py
+include *.txt
