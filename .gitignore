@@ -21,6 +21,9 @@ atlassian-ide-plugin.xml
 # Virtualenv
 .venv
 
+# Development build artifacts
+*.egg-info
+
 # OS X metadata files
 .DS_Store
 
