@@ -33,7 +33,6 @@ def utc_now():
     return datetime.datetime.utcnow().isoformat()
 
 
-@ignore_resource_warnings
 class TestLoader(AbstractLoaderTest):
     """unit tests for standard loader"""
 
@@ -62,6 +61,7 @@ class TestLoader(AbstractLoaderTest):
             key.delete()
         cls.bucket.delete()
 
+    @ignore_resource_warnings
     def test_bucket_exists(self):
         """Just a sanity check to make sure test files are uploaded"""
         self.s3.meta.client.head_bucket(Bucket=self.bucket_name)
@@ -167,6 +167,7 @@ class TestLoader(AbstractLoaderTest):
 
     # TODO add some tests for credentials and stuff so that we get nice error messages
 
+    @ignore_resource_warnings
     def _test_loading_bundles_dict(self, bundles: typing.List[dict]):
         # Nothing should have been processed at this point
         self.assertEqual(len(self.loader.bundles_parsed), 0)
@@ -231,14 +232,17 @@ class TestLoader(AbstractLoaderTest):
     def test_no_bundles_dict(self):
         self._test_loading_bundles_dict([])
 
+    @ignore_resource_warnings
     def test_minimal_bundle_dict(self):
         """Try and load a minimally formed bundle"""
         self._test_loading_bundles_dict([self._make_minimal_bundle(parsed=False)])
 
+    @ignore_resource_warnings
     def test_empty_bundle(self):
         """Can we load a bundle with no files?"""
         self._test_loading_bundles_dict([self._make_minimal_bundle(parsed=False, files=0)])
 
+    @ignore_resource_warnings
     def test_multiple_bundles_dict(self):
         """If one works, how about a few?"""
         self._test_loading_bundles_dict([self._make_minimal_bundle(parsed=False) for _ in range(5)])
@@ -252,18 +256,21 @@ class TestLoader(AbstractLoaderTest):
             for data_object in bundle.data_files:
                 self.assertTrue(data_object.file_uuid in loaded_file_uuids)
 
+    @ignore_resource_warnings
     def test_minimal_bundle_in_dss(self):
         """Try and load a minimally formed bundle"""
         min_bundle = self._make_minimal_bundle()
         self.loader._load_bundle(*min_bundle)
         self._test_bundles_in_dss([min_bundle])
 
+    @ignore_resource_warnings
     def test_bigger_bundle_in_dss(self):
         """Test loading a bundle with several files"""
         big_bundle = self._make_minimal_bundle(files=4)
         self.loader._load_bundle(*big_bundle)
         self._test_bundles_in_dss([big_bundle])
 
+    @ignore_resource_warnings
     def test_duplicate_file_upload(self):
         """
         We don't want data files to be re-uploaded if a new bundle uses a file that's already in another bundle
@@ -293,6 +300,7 @@ class TestLoader(AbstractLoaderTest):
         # make sure the file HAS already been uploaded
         self.assertTrue(already_present)
 
+    @ignore_resource_warnings
     def test_bad_URL(self):
         """Make sure a bundle with a invalid URL fails"""
         bundle = self._make_minimal_bundle(parsed=True)
