@@ -48,7 +48,7 @@ class Gen3FormatBundleUploader:
         file_info_list = []
 
         # load metadata
-        file_uuid, file_version, filename = \
+        file_uuid, file_version, filename, _ = \
             self.metadata_file_uploader.load_dict(metadata_dict,
                                                   "metadata.json",
                                                   SCHEMA_URL,
@@ -59,7 +59,7 @@ class Gen3FormatBundleUploader:
         for file_info in file_manifest:
             cloud_urls = self._get_cloud_urls(file_info)
             file_uuid, file_guid = self._get_file_ids(file_info)
-            file_uuid, file_version, filename = \
+            file_uuid, file_version, filename, _ = \
                 self.dss_uploader.upload_cloud_file_by_reference(file_info['name'],
                                                                  # use did for uuid for now. will probably have to
                                                                  # extract from guid (did) in the future
@@ -73,6 +73,7 @@ class Gen3FormatBundleUploader:
         # load bundle
         self.dss_uploader.load_bundle(file_info_list, bundle_uuid)
 
-    def load_all_bundles(self, input_json: list):
+    def load_all_bundles(self, input_json: list) -> bool:
         for bundle in input_json:
             self._load_bundle(bundle)
+        return True

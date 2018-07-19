@@ -13,32 +13,23 @@ import hca
 import jsonschema
 import requests
 
+from loader import base_loader
 from loader.schemas import standard_schema
 from loader.standard_loader import SCHEMA_URL
 from scripts.cgp_data_loader import main as cgp_data_loader_main
 from tests import eventually, ignore_resource_warnings, message
+from tests.abstract_loader_test import AbstractLoaderTest
 
 logger = logging.getLogger(__name__)
 
 TEST_DATA_PATH = Path(__file__).parents[1] / 'tests' / 'test_data'
 
 
-class TestStandardInputFormatLoading(unittest.TestCase):
-    # TODO: tests to add:
-    #  - Keyboard interrupt test
-    #  - test unparsable and unloadable bundles
-    #  - test different formats for guids, with prefix, without, etc.
-    #  - test that we can still load if file doesn't have 'updated' metadata
-    #  - test uploading more than just 1 bundle
-    #  - test a minimal json to be added to dss
+class TestStandardInputFormatLoading(AbstractLoaderTest):
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.dss_client = hca.dss.DSSClient()
-        cls.dss_client.host = 'https://hca-dss-4.ucsc-cgp-dev.org/v1'
-        cls.dss_endpoint = os.getenv("TEST_DSS_ENDPOINT", "https://hca-dss-4.ucsc-cgp-dev.org/v1")
-        cls.staging_bucket = os.getenv("DSS_S3_STAGING_BUCKET", "mbaumann-dss-staging")
         cls.test_file = TEST_DATA_PATH / 'gen3_sample_input_standard_metadata.json'
 
     def test_data_matches_schema(self):
@@ -64,7 +55,6 @@ class TestStandardInputFormatLoading(unittest.TestCase):
 
             # change all references to the file guid
             object_key = data_bundle['data_object_ids'][0]
-            # FIXME file_guid doesn't have url prefix!
             data_bundle['data_object_ids'][0] = file_guid
             data_objects[file_guid] = data_objects[object_key]
             del data_objects[object_key]
@@ -92,8 +82,6 @@ class TestStandardInputFormatLoading(unittest.TestCase):
                 f'{self.dss_endpoint}',
                 '--staging-bucket',
                 f'{self.staging_bucket}',
-                '--log',
-                'DEBUG',
                 'standard',
                 '--json-input-file',
                 f'{tmp_json}']
@@ -101,19 +89,7 @@ class TestStandardInputFormatLoading(unittest.TestCase):
 
     @ignore_resource_warnings
     def _test_gen3_loading_from_cli(self, test_json):
-        """
-        Test that a Gen3 JSON format input file can be uploaded to the DSS,
-        and that all of the data files loaded are loaded by reference
-        and set to not be indexed.
-
-        1. Generates a Gen3 JSON input file from a template with a new unique 'bundle_did'
-           and a new 'did' for the first file in the bundle.
-        2. Searches the DSS to make sure it doesn't already exist using the HCA CLI Python bindings.
-        3. Uploads the gen3 json to the DSS.
-        4. Searches the DSS to verify the bundle was uploaded and indexed successfully.
-        5. Assert data files are loaded by reference and set to not be indexed.
-        6. Assert that the new 'did' for the first file in the bundle was found in the results.
-        """
+        """A wrapper for the actual test"""
 
         message("Test that initial loading works successfully")
         # mint a new 'bundle_did'
@@ -129,13 +105,19 @@ class TestStandardInputFormatLoading(unittest.TestCase):
         self._test_gen3_loading(test_json, guid, file_guid, file_version)
 
     def _test_gen3_loading(self, test_json, bundle_guid, file_guid, file_version):
+        """
+        Test that a Gen3 JSON format input file can be uploaded to the DSS,
+        and that all of the data files loaded are loaded by reference
+        and set to not be indexed.
 
-        @eventually(timeout_seconds=5.0, retry_interval_seconds=1.0)
-        def _search_for_bundle(bundle_uuid):
-            # Search for the bundle uuid in the DSS and make sure it now exists and uploading was successful
-            search_results = self.dss_client.post_search(es_query={'query': {'term': {'uuid': bundle_uuid}}}, replica='aws')
-            assert search_results['total_hits'] > 0
-            return search_results
+        1. Generates a Gen3 JSON input file from a template with a new unique 'bundle_did'
+           and a new 'did' for the first file in the bundle.
+        2. Searches the DSS to make sure it doesn't already exist using the HCA CLI Python bindings.
+        3. Uploads the gen3 json to the DSS.
+        4. Searches the DSS to verify the bundle was uploaded and indexed successfully.
+        5. Assert data files are loaded by reference and set to not be indexed.
+        6. Assert that the new 'did' for the first file in the bundle was found in the results.
+        """
 
         message("Search for the bundle uuid in the DSS to make sure it does not exist yet")
         search_results = self.dss_client.post_search(es_query={'query': {'term': {'uuid': bundle_guid}}}, replica='aws')
@@ -147,7 +129,7 @@ class TestStandardInputFormatLoading(unittest.TestCase):
             self._load_file(tmp_json)
 
             message("Wait for newly loaded bundle to appear in search results")
-            search_results = _search_for_bundle(bundle_guid)
+            search_results = self._search_for_bundle(bundle_guid)
 
             message("Verify that all of the results (except metadata.json) are file references "
                     "and set to not be indexed")
