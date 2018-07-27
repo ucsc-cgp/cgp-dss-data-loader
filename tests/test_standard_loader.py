@@ -18,9 +18,8 @@ from tests import ignore_resource_warnings
 from tests.abstract_loader_test import AbstractLoaderTest
 from util import load_json_from_file
 
-logger = logging.getLogger(__name__)
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 TEST_DATA_PATH = Path(__file__).parents[1] / 'tests' / 'test_data'
 
@@ -168,14 +167,14 @@ class TestLoader(AbstractLoaderTest):
     # TODO add some tests for credentials and stuff so that we get nice error messages
 
     @ignore_resource_warnings
-    def _test_loading_bundles_dict(self, bundles: typing.List[dict]):
+    def _test_loading_bundles_dict(self, bundles: typing.List[dict], concurrently=False):
         # Nothing should have been processed at this point
         self.assertEqual(len(self.loader.bundles_parsed), 0)
         self.assertEqual(len(self.loader.bundles_loaded), 0)
         self.assertEqual(len(self.loader.bundles_failed_unparsed), 0)
         self.assertEqual(len(self.loader.bundles_failed_parsed), 0)
 
-        self.loader.load_all_bundles(bundles)
+        self.loader.load_all_bundles(bundles, concurrently=concurrently)
 
         self.assertEqual(len(self.loader.bundles_loaded), len(bundles))
         self.assertEqual(len(self.loader.bundles_parsed), len(bundles))
@@ -247,6 +246,41 @@ class TestLoader(AbstractLoaderTest):
         """If one works, how about a few?"""
         self._test_loading_bundles_dict([self._make_minimal_bundle(parsed=False) for _ in range(5)])
 
+    @ignore_resource_warnings
+    def test_minimal_bundle_dict_concurrently(self):
+        """
+        Try and load a minimally formed bundle.
+
+        Even though this is a concurrent test, nothing is actually running concurrently
+        since there is only one bundle
+        """
+        self._test_loading_bundles_dict([self._make_minimal_bundle(parsed=False)], concurrently=True)
+
+    @ignore_resource_warnings
+    def test_empty_bundle_concurrently(self):
+        """
+        Can we load a bundle with no files?
+
+        Even though this is a concurrent test, nothing is actually running concurrently
+        since there are no bundles :)
+        """
+        self._test_loading_bundles_dict([self._make_minimal_bundle(parsed=False, files=0)], concurrently=True)
+
+    @ignore_resource_warnings
+    def test_multiple_bundles_dict_concurrently(self):
+        """
+        If one works, how about a few?
+
+        Actually test the concurrency.
+        TODO: This test and/or the next one should probably have a timeout to confirm concurrency
+        """
+        self._test_loading_bundles_dict([self._make_minimal_bundle(parsed=False) for _ in range(5)], concurrently=True)
+
+    @ignore_resource_warnings
+    def test_many_bundles_dict_concurrently(self):
+        """Same as above but with even more bundles"""
+        self._test_loading_bundles_dict([self._make_minimal_bundle(parsed=False) for _ in range(20)], concurrently=True)
+
     def _test_bundles_in_dss(self, bundles: typing.List[ParsedBundle]):
         """Searches the DSS for the bundles and checks that all the files are there"""
         for bundle in bundles:
@@ -260,14 +294,14 @@ class TestLoader(AbstractLoaderTest):
     def test_minimal_bundle_in_dss(self):
         """Try and load a minimally formed bundle"""
         min_bundle = self._make_minimal_bundle()
-        self.loader._load_bundle(*min_bundle)
+        self.loader._load_bundle(*min_bundle, 0)
         self._test_bundles_in_dss([min_bundle])
 
     @ignore_resource_warnings
     def test_bigger_bundle_in_dss(self):
         """Test loading a bundle with several files"""
         big_bundle = self._make_minimal_bundle(files=4)
-        self.loader._load_bundle(*big_bundle)
+        self.loader._load_bundle(*big_bundle, 0)
         self._test_bundles_in_dss([big_bundle])
 
     @ignore_resource_warnings
@@ -305,8 +339,8 @@ class TestLoader(AbstractLoaderTest):
         """Make sure a bundle with a invalid URL fails"""
         bundle = self._make_minimal_bundle(parsed=True)
         bundle.data_files[0].cloud_urls[0] = 'https://example.com'
-        self.assertRaises(FileURLError, self.loader._load_bundle, *bundle)
+        self.assertRaises(FileURLError, self.loader._load_bundle, *bundle, 0)
         bundle.data_files[0].cloud_urls[0] = 's3://definatelynotavalidbucketorfile'
-        self.assertRaises(FileURLError, self.loader._load_bundle, *bundle)
+        self.assertRaises(FileURLError, self.loader._load_bundle, *bundle, 1)
         bundle.data_files[0].cloud_urls[0] = 'gs://definatelynotavalidbucketorfile'
-        self.assertRaises(FileURLError, self.loader._load_bundle, *bundle)
+        self.assertRaises(FileURLError, self.loader._load_bundle, *bundle, 2)
