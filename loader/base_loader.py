@@ -30,10 +30,14 @@ import botocore
 import requests
 from boto3.s3.transfer import TransferConfig
 from cloud_blobstore import s3
-from dcplib.checksumming_io import ChecksummingBufferedReader, S3Etag
+from dcplib import s3_multipart
+from dcplib.checksumming_io import ChecksummingBufferedReader
 from google.cloud.storage import Client
+from hca import HCAConfig
 from hca.dss import DSSClient
 from hca.util import SwaggerAPIException
+
+from util import tz_utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -72,9 +76,9 @@ class DssUploader:
         self.s3_client = boto3.client("s3")
         self.s3_blobstore = s3.S3BlobStore(self.s3_client)
         self.gs_client = Client()
-        os.environ.pop('HCA_CONFIG_FILE', None)
-        self.dss_client = DSSClient()
-        self.dss_client.host = self.dss_endpoint
+        dss_config = HCAConfig()
+        dss_config['DSSClient'].swagger_url = f'{self.dss_endpoint}/swagger.json'
+        self.dss_client = DSSClient(config=dss_config)
 
     def upload_cloud_file_by_reference(self,
                                        filename: str,
@@ -268,7 +272,11 @@ class DssUploader:
         :param bundle_uuid: An RFC4122-compliant UUID to be used to identify the bundle containing the file
         :return: A full qualified bundle id e.g. "{bundle_uuid}.{version}"
         """
-        kwargs = dict(replica="aws", creator_uid=CREATOR_ID, files=file_info_list, uuid=bundle_uuid)
+        kwargs = dict(replica="aws",
+                      creator_uid=CREATOR_ID,
+                      files=file_info_list,
+                      uuid=bundle_uuid,
+                      version=tz_utc_now())
         if not self.dry_run:
             response = self.dss_client.put_bundle(**kwargs)
             version = response['version']
@@ -308,12 +316,14 @@ class DssUploader:
                 return type_
             return "application/octet-stream"
 
-        tx_cfg = TransferConfig(multipart_threshold=S3Etag.etag_stride,
-                                multipart_chunksize=S3Etag.etag_stride)
+        file_size = os.path.getsize(path)
+        multipart_chunksize = s3_multipart.get_s3_multipart_chunk_size(file_size)
+        tx_cfg = TransferConfig(multipart_threshold=s3_multipart.MULTIPART_THRESHOLD,
+                                multipart_chunksize=multipart_chunksize)
         s3 = boto3.resource("s3")
 
         destination_bucket = s3.Bucket(self.staging_bucket)
-        with open(path, "rb") as file_handle, ChecksummingBufferedReader(file_handle) as fh:
+        with open(path, "rb") as file_handle, ChecksummingBufferedReader(file_handle, multipart_chunksize) as fh:
             key_name = "{}/{}".format(file_uuid, os.path.basename(fh.raw.name))
             destination_bucket.upload_fileobj(
                 fh,
