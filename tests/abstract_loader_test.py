@@ -5,22 +5,40 @@ import unittest
 from contextlib import contextmanager
 from pathlib import Path
 
-import hca
+from hca import HCAConfig
+from hca.dss import DSSClient
 
 from scripts.cgp_data_loader import main as cgp_data_loader_main
-
+from tests import eventually
+from util import monkey_patch_hca_config
 
 TEST_DATA_PATH = Path(__file__).parents[1] / 'tests' / 'test_data'
 
 
-class AbstractLoaderTest:
+class AbstractLoaderTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.dss_client = hca.dss.DSSClient()
-        cls.dss_client.host = 'https://hca-dss-4.ucsc-cgp-dev.org/v1'
-        cls.dss_endpoint = os.getenv('TEST_DSS_ENDPOINT', cls.dss_client.host)
-        cls.staging_bucket = os.getenv('DSS_S3_STAGING_BUCKET', 'mbaumann-dss-staging')
+        super().setUpClass()
+        cls.dss_endpoint = os.getenv("TEST_DSS_ENDPOINT", "https://hca-dss-4.ucsc-cgp-dev.org/v1")
+        cls.staging_bucket = os.getenv('DSS_S3_STAGING_BUCKET', 'commons-dss-upload')
+
+        # Work around problems with DSSClient initialization when there is
+        # existing HCA configuration. The following issue has been submitted:
+        # Problems accessing an alternate DSS from user scripts or unit tests #170
+        # https://github.com/HumanCellAtlas/dcp-cli/issues/170
+        monkey_patch_hca_config()
+        HCAConfig._user_config_home = '/tmp/'
+        dss_config = HCAConfig(name='loader-test', save_on_exit=False, autosave=False)
+        dss_config['DSSClient'].swagger_url = f'{cls.dss_endpoint}/swagger.json'
+        cls.dss_client = DSSClient(config=dss_config)
+
+    @eventually(timeout_seconds=5.0, retry_interval_seconds=1.0)
+    def _search_for_bundle(self, bundle_uuid):
+        # Search for the bundle uuid in the DSS and make sure it now exists and uploading was successful
+        search_results = self.dss_client.post_search(es_query={'query': {'term': {'uuid': bundle_uuid}}}, replica='aws')
+        assert search_results['total_hits'] > 0
+        return search_results
 
     @staticmethod
     @contextmanager

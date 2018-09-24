@@ -30,14 +30,26 @@ import botocore
 import requests
 from boto3.s3.transfer import TransferConfig
 from cloud_blobstore import s3
-from dcplib.checksumming_io import ChecksummingBufferedReader, S3Etag
+from dcplib import s3_multipart
+from dcplib.checksumming_io import ChecksummingBufferedReader
 from google.cloud.storage import Client
+from hca import HCAConfig
 from hca.dss import DSSClient
 from hca.util import SwaggerAPIException
+
+from util import tz_utc_now, monkey_patch_hca_config
 
 logger = logging.getLogger(__name__)
 
 CREATOR_ID = 20
+
+
+class FileURLError(Exception):
+    """Thrown when a file cannot be accessed by the given URl"""
+
+
+class UnexpectedResponseError(Exception):
+    """Thrown when DSS gives an unexpected response"""
 
 
 class DssUploader:
@@ -64,9 +76,16 @@ class DssUploader:
         self.s3_client = boto3.client("s3")
         self.s3_blobstore = s3.S3BlobStore(self.s3_client)
         self.gs_client = Client()
-        os.environ.pop('HCA_CONFIG_FILE', None)
-        self.dss_client = DSSClient()
-        self.dss_client.host = self.dss_endpoint
+
+        # Work around problems with DSSClient initialization when there is
+        # existing HCA configuration. The following issue has been submitted:
+        # Problems accessing an alternate DSS from user scripts or unit tests #170
+        # https://github.com/HumanCellAtlas/dcp-cli/issues/170
+        monkey_patch_hca_config()
+        HCAConfig._user_config_home = '/tmp/'
+        dss_config = HCAConfig(name='loader', save_on_exit=False, autosave=False)
+        dss_config['DSSClient'].swagger_url = f'{self.dss_endpoint}/swagger.json'
+        self.dss_client = DSSClient(config=dss_config)
 
     def upload_cloud_file_by_reference(self,
                                        filename: str,
@@ -97,7 +116,7 @@ class DssUploader:
         :param guid: An optional additional/alternate data identifier/alias to associate with the file
         e.g. "dg.4503/887388d7-a974-4259-86af-f5305172363d"
         :param file_version: a RFC3339 compliant datetime string
-        :return: file_uuid: str, file_version: str, filename: str
+        :return: file_uuid: str, file_version: str, filename: str, already_present: bool
         """
 
         def _create_file_reference(file_cloud_urls: set, guid: str) -> dict:
@@ -124,7 +143,7 @@ class DssUploader:
                 elif url.scheme == "gs":
                     gs_metadata = _get_gs_file_metadata(bucket, key)
                 else:
-                    logger.warning("Unsupported cloud URL scheme: {cloud_url}")
+                    raise FileURLError("Unsupported cloud URL scheme: {cloud_url}")
             return _consolidate_metadata(file_cloud_urls, s3_metadata, gs_metadata, guid)
 
         def _get_s3_file_metadata(bucket: str, key: str) -> dict:
@@ -141,8 +160,8 @@ class DssUploader:
                 metadata['content-type'] = response['ContentType']
                 metadata['s3_etag'] = response['ETag']
                 metadata['size'] = response['ContentLength']
-            except botocore.exceptions.ClientError as e:
-                logger.warning(f"Error accessing s3://{bucket}/{key} Exception: {e}")
+            except Exception as e:
+                raise FileURLError(f"Error accessing s3://{bucket}/{key}") from e
             return metadata
 
         def _get_gs_file_metadata(bucket: str, key: str) -> dict:
@@ -161,7 +180,7 @@ class DssUploader:
                 metadata['crc32c'] = binascii.hexlify(base64.b64decode(blob_obj.crc32c)).decode("utf-8").lower()
                 metadata['size'] = blob_obj.size
             except Exception as e:
-                logger.warning(f"Error accessing gs://{bucket}/{key} Exception: {e}")
+                raise FileURLError(f"Error accessing gs://{bucket}/{key}") from e
             return metadata
 
         def _consolidate_metadata(file_cloud_urls: set,
@@ -215,7 +234,7 @@ class DssUploader:
         :param bundle_uuid: An RFC4122-compliant UUID to be used to identify the bundle containing the file
         :param content_type: Content description e.g. "application/json; dss-type=fileref".
         :param file_version: a RFC3339 compliant datetime string
-        :return: file_uuid: str, file_version: str, filename: str
+        :return: file_uuid: str, file_version: str, filename: str, already_present: bool
         """
         tempdir = mkdtemp()
         file_path = "/".join([tempdir, filename])
@@ -243,7 +262,7 @@ class DssUploader:
         :param bundle_uuid: An RFC4122-compliant UUID to be used to identify the bundle containing the file
         :param content_type: Content type identifier, for example: "application/json; dss-type=fileref".
         :param file_version: a RFC3339 compliant datetime string
-        :return: file_uuid: str, file_version: str, filename: str
+        :return: file_uuid: str, file_version: str, filename: str, already_present: bool
         """
         file_uuid, key = self._upload_local_file_to_staging(path, file_uuid, content_type)
         return self._upload_tagged_cloud_file_to_dss_by_copy(self.staging_bucket,
@@ -260,7 +279,11 @@ class DssUploader:
         :param bundle_uuid: An RFC4122-compliant UUID to be used to identify the bundle containing the file
         :return: A full qualified bundle id e.g. "{bundle_uuid}.{version}"
         """
-        kwargs = dict(replica="aws", creator_uid=CREATOR_ID, files=file_info_list, uuid=bundle_uuid)
+        kwargs = dict(replica="aws",
+                      creator_uid=CREATOR_ID,
+                      files=file_info_list,
+                      uuid=bundle_uuid,
+                      version=tz_utc_now())
         if not self.dry_run:
             response = self.dss_client.put_bundle(**kwargs)
             version = response['version']
@@ -300,12 +323,14 @@ class DssUploader:
                 return type_
             return "application/octet-stream"
 
-        tx_cfg = TransferConfig(multipart_threshold=S3Etag.etag_stride,
-                                multipart_chunksize=S3Etag.etag_stride)
+        file_size = os.path.getsize(path)
+        multipart_chunksize = s3_multipart.get_s3_multipart_chunk_size(file_size)
+        tx_cfg = TransferConfig(multipart_threshold=s3_multipart.MULTIPART_THRESHOLD,
+                                multipart_chunksize=multipart_chunksize)
         s3 = boto3.resource("s3")
 
         destination_bucket = s3.Bucket(self.staging_bucket)
-        with open(path, "rb") as file_handle, ChecksummingBufferedReader(file_handle) as fh:
+        with open(path, "rb") as file_handle, ChecksummingBufferedReader(file_handle, multipart_chunksize) as fh:
             key_name = "{}/{}".format(file_uuid, os.path.basename(fh.raw.name))
             destination_bucket.upload_fileobj(
                 fh,
@@ -345,7 +370,7 @@ class DssUploader:
         :param bundle_uuid: An RFC4122-compliant UUID to be used to identify the bundle containing the file
         :param file_version: a RFC3339 compliant datetime string
         :param timeout_seconds:  Amount of time to continue attempting an async copy.
-        :return: file_uuid: str, file_version: str, filename: str
+        :return: file_uuid: str, file_version: str, filename: str, file_present: bool
         """
         source_url = f"s3://{source_bucket}/{source_key}"
         filename = self.get_filename_from_key(source_key)
@@ -368,15 +393,21 @@ class DssUploader:
         # and we need this format update when doing load bundle
         file_version = response.json().get('version', "blank")
 
-        if response.status_code in (requests.codes.ok, requests.codes.created):
+        # from dss swagger docs:
+        # 200 Returned when the file is already present and is identical to the file being uploaded.
+        already_present = response.status_code == requests.codes.ok
+        if response.status_code == requests.codes.ok:
+            logger.info("File %s: Already exists -> %s (%d seconds)",
+                        source_url, file_version, (time.time() - copy_start_time))
+        elif response.status_code == requests.codes.created:
             logger.info("File %s: Sync copy -> %s (%d seconds)",
                         source_url, file_version, (time.time() - copy_start_time))
-        else:
-            assert response.status_code == requests.codes.accepted
+        elif response.status_code == requests.codes.accepted:
             logger.info("File %s: Starting async copy -> %s", source_url, file_version)
 
             timeout = time.time() + timeout_seconds
             wait = 1.0
+            # TODO: busy wait could hopefully be replaced with asyncio
             while time.time() < timeout:
                 try:
                     self.dss_client.head_file(uuid=file_uuid, replica="aws", version=file_version)
@@ -393,8 +424,10 @@ class DssUploader:
                 # timed out. :(
                 raise RuntimeError("File {}: registration FAILED".format(source_url))
             logger.debug("Successfully uploaded file")
+        else:
+            raise UnexpectedResponseError(f'Received unexpected response code {response.status_code}')
 
-        return file_uuid, file_version, filename
+        return file_uuid, file_version, filename, already_present
 
 
 class MetadataFileUploader:
@@ -411,7 +444,6 @@ class MetadataFileUploader:
             metadata = json.load(fh)
         return self.load_dict(metadata, filename, schema_url, bundle_uuid)
 
-    # TODO: we should maybe pass the file_version parameter, but doing so could break tests so we're waiting a bit
     def load_dict(self, metadata: dict, filename: str, schema_url: str, bundle_uuid: str, file_version=None) -> tuple:
         metadata['describedBy'] = schema_url
         # metadata files don't have file_uuids which is why we have to make it up on the spot

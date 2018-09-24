@@ -1,6 +1,5 @@
 import datetime
 import json
-import os
 import tempfile
 import unittest
 import uuid
@@ -9,36 +8,25 @@ import logging
 from contextlib import contextmanager
 from pathlib import Path
 
-import hca
 import jsonschema
 import requests
 
 from loader.schemas import standard_schema
 from loader.standard_loader import SCHEMA_URL
 from scripts.cgp_data_loader import main as cgp_data_loader_main
-from tests import eventually, ignore_resource_warnings, message
+from tests import ignore_resource_warnings, message
+from tests.abstract_loader_test import AbstractLoaderTest
 
 logger = logging.getLogger(__name__)
 
 TEST_DATA_PATH = Path(__file__).parents[1] / 'tests' / 'test_data'
 
 
-class TestStandardInputFormatLoading(unittest.TestCase):
-    # TODO: tests to add:
-    #  - Keyboard interrupt test
-    #  - test unparsable and unloadable bundles
-    #  - test different formats for guids, with prefix, without, etc.
-    #  - test that we can still load if file doesn't have 'updated' metadata
-    #  - test uploading more than just 1 bundle
-    #  - test a minimal json to be added to dss
+class TestStandardInputFormatLoading(AbstractLoaderTest):
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.dss_client = hca.dss.DSSClient()
-        cls.dss_client.host = 'https://hca-dss-4.ucsc-cgp-dev.org/v1'
-        cls.dss_endpoint = os.getenv("TEST_DSS_ENDPOINT", "https://hca-dss-4.ucsc-cgp-dev.org/v1")
-        cls.staging_bucket = os.getenv("DSS_S3_STAGING_BUCKET", "mbaumann-dss-staging")
         cls.test_file = TEST_DATA_PATH / 'gen3_sample_input_standard_metadata.json'
 
     def test_data_matches_schema(self):
@@ -47,7 +35,10 @@ class TestStandardInputFormatLoading(unittest.TestCase):
         for bundle in test_json:
             jsonschema.validate(bundle, standard_schema)
 
-    def test_basic_input_format_loading_from_cli(self):
+    def test_basic_input_format_loading_from_cli_serial(self):
+        self._test_gen3_loading_from_cli(self.test_file, more_args=['--serial'])
+
+    def test_basic_input_format_loading_from_cli_concurrent(self):
         self._test_gen3_loading_from_cli(self.test_file)
 
     @staticmethod
@@ -64,7 +55,6 @@ class TestStandardInputFormatLoading(unittest.TestCase):
 
             # change all references to the file guid
             object_key = data_bundle['data_object_ids'][0]
-            # FIXME file_guid doesn't have url prefix!
             data_bundle['data_object_ids'][0] = file_guid
             data_objects[file_guid] = data_objects[object_key]
             del data_objects[object_key]
@@ -84,7 +74,7 @@ class TestStandardInputFormatLoading(unittest.TestCase):
                 json.dump(fixed_json, fh)
             yield jsonFile.name
 
-    def _load_file(self, tmp_json):
+    def _load_file(self, tmp_json, more_args=None):
         """run the load script and clean up after ourselves"""
         # upload the data bundle to the DSS
         args = ['--no-dry-run',
@@ -92,15 +82,30 @@ class TestStandardInputFormatLoading(unittest.TestCase):
                 f'{self.dss_endpoint}',
                 '--staging-bucket',
                 f'{self.staging_bucket}',
-                '--log',
-                'DEBUG',
-                'standard',
-                '--json-input-file',
                 f'{tmp_json}']
+        if more_args:
+            # Prepend because positional arg has to be last
+            args = more_args + args
         cgp_data_loader_main(args)
 
     @ignore_resource_warnings
-    def _test_gen3_loading_from_cli(self, test_json):
+    def _test_gen3_loading_from_cli(self, test_json, more_args=None):
+        """A wrapper for the actual test"""
+
+        message("Test that initial loading works successfully")
+        # mint a new 'bundle_did'
+        guid = str(uuid.uuid4())
+        # make new guid for first file
+        file_guid = f'dg.4503/{str(uuid.uuid4())}'
+        # we want a new version of the file to be uploaded
+        file_version = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        self._test_gen3_loading(test_json, guid, file_guid, file_version, more_args=more_args)
+
+        message("Test that uploading again will be handled successfully")
+        guid = str(uuid.uuid4())
+        self._test_gen3_loading(test_json, guid, file_guid, file_version, more_args=more_args)
+
+    def _test_gen3_loading(self, test_json, bundle_guid, file_guid, file_version, more_args=None):
         """
         Test that a Gen3 JSON format input file can be uploaded to the DSS,
         and that all of the data files loaded are loaded by reference
@@ -115,28 +120,6 @@ class TestStandardInputFormatLoading(unittest.TestCase):
         6. Assert that the new 'did' for the first file in the bundle was found in the results.
         """
 
-        message("Test that initial loading works successfully")
-        # mint a new 'bundle_did'
-        guid = str(uuid.uuid4())
-        # make new guid for first file
-        file_guid = f'dg.4503/{str(uuid.uuid4())}'
-        # we want a new version of the file to be uploaded
-        file_version = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        self._test_gen3_loading(test_json, guid, file_guid, file_version)
-
-        message("Test that uploading again will be handled successfully")
-        guid = str(uuid.uuid4())
-        self._test_gen3_loading(test_json, guid, file_guid, file_version)
-
-    def _test_gen3_loading(self, test_json, bundle_guid, file_guid, file_version):
-
-        @eventually(timeout_seconds=5.0, retry_interval_seconds=1.0)
-        def _search_for_bundle(bundle_uuid):
-            # Search for the bundle uuid in the DSS and make sure it now exists and uploading was successful
-            search_results = self.dss_client.post_search(es_query={'query': {'term': {'uuid': bundle_uuid}}}, replica='aws')
-            assert search_results['total_hits'] > 0
-            return search_results
-
         message("Search for the bundle uuid in the DSS to make sure it does not exist yet")
         search_results = self.dss_client.post_search(es_query={'query': {'term': {'uuid': bundle_guid}}}, replica='aws')
         assert search_results['total_hits'] == 0
@@ -144,18 +127,18 @@ class TestStandardInputFormatLoading(unittest.TestCase):
         message("Prepare test input file to load")
         with self._tmp_json_file(test_json, bundle_guid, file_guid, file_version) as tmp_json:
             message("Load the test input file")
-            self._load_file(tmp_json)
+            self._load_file(tmp_json, more_args=more_args)
 
             message("Wait for newly loaded bundle to appear in search results")
-            search_results = _search_for_bundle(bundle_guid)
+            search_results = self._search_for_bundle(bundle_guid)
 
             message("Verify that all of the results (except metadata.json) are file references "
                     "and set to not be indexed")
             found_matching_file = False
-            for r in search_results['results']:
-                response = requests.get(r['bundle_url'])
-                returned_json = response.json()
-                for f in returned_json['bundle']['files']:
+            for result in search_results['results']:
+                bundle_uuid, _, bundle_version = result['bundle_fqid'].partition(".")
+                bundle_manifest = self.dss_client.get_bundle(replica="aws", uuid=bundle_uuid, version=bundle_version)
+                for f in bundle_manifest['bundle']['files']:
                     if f['name'] != 'metadata.json':
                         assert f['indexed'] is False
                         assert 'dss-type=fileref' in f['content-type']
