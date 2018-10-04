@@ -35,7 +35,7 @@ def main(argv=sys.argv[1:]):
     parser.add_argument("-l", "--log", dest="log_level",
                         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                         default="INFO", help="Set the logging level")
-    parser.add_argument('--serial', action='store_false', default=True,
+    parser.add_argument('--serial', action='store_true', default=False,
                         help='Upload bundles serially. This can be useful for debugging')
     parser.add_argument('input_json', metavar='INPUT_JSON',
                         help="Path to the standard JSON format input file")
