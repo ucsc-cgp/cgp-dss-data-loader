@@ -10,7 +10,7 @@ from util import patch_connection_pools, tz_utc_now
 logger = logging.getLogger(__name__)
 
 SCHEMA_URL = ('https://raw.githubusercontent.com/DataBiosphere/metadata-schema/master/'
-              'json_schema/cgp/gen3/2.0.0/cgp_gen3_metadata.json')
+              'json_schema/cgp/gen3/3.0.0/cgp_gen3_metadata.json')
 
 
 class ParseError(Exception):
