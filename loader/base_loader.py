@@ -24,7 +24,7 @@ from io import open
 from tempfile import mkdtemp
 from typing import Any, Dict
 from urllib.parse import urlparse
-from warnings import warn
+import warnings
 
 import boto3
 import botocore
@@ -33,6 +33,7 @@ from boto3.s3.transfer import TransferConfig
 from cloud_blobstore import s3
 from dcplib import s3_multipart
 from dcplib.checksumming_io import ChecksummingBufferedReader
+from google.oauth2.credentials import Credentials
 from google.cloud.storage import Client
 from hca import HCAConfig
 from hca.dss import DSSClient
@@ -46,27 +47,33 @@ CREATOR_ID = 20
 
 class CloudUrlAccessWarning(Warning):
     """Warning when a cloud URL could not be accessed for any reason"""
+    pass
 
 class CloudUrlAccessForbidden(CloudUrlAccessWarning):
     """Warning when a cloud URL could not be accessed due to authorization issues"""
+    pass
 
 class CloudUrlNotFound(CloudUrlAccessWarning):
     """Warning when a cloud URL was not found"""
+    pass
 
 class FileURLError(Exception):
     """Thrown when a file cannot be accessed by the given URl"""
+    pass
 
 
 class InconsistentFileSizeValues(Exception):
     """Thrown when the input file size does not match the actual file size of a file being loaded by reference"""
-
+    pass
 
 class MissingInputFileSize(Exception):
     """Thrown when the input file size is not available for a data file being loaded by reference"""
+    pass
 
 
 class UnexpectedResponseError(Exception):
     """Thrown when DSS gives an unexpected response"""
+    pass
 
 
 class DssUploader:
@@ -92,7 +99,6 @@ class DssUploader:
         self.dry_run = dry_run
         self.s3_client = boto3.client("s3")
         self.s3_blobstore = s3.S3BlobStore(self.s3_client)
-        self.gs_client = Client()
 
         # Work around problems with DSSClient initialization when there is
         # existing HCA configuration. The following issue has been submitted:
@@ -100,9 +106,29 @@ class DssUploader:
         # https://github.com/HumanCellAtlas/dcp-cli/issues/170
         monkey_patch_hca_config()
         HCAConfig._user_config_home = '/tmp/'
-        dss_config = HCAConfig(name='loader', save_on_exit=False, autosave=False)
+        dss_config = HCAConfig(name='hca', save_on_exit=False, autosave=False)
         dss_config['DSSClient'].swagger_url = f'{self.dss_endpoint}/swagger.json'
         self.dss_client = DSSClient(config=dss_config)
+
+        def get_gs_credentials_from_dss_config(dss_client: DSSClient) -> Credentials:
+            dss_config = dss_client.config
+            # def __init__(self, token, refresh_token=None, id_token=None,
+            #              token_uri=None, client_id=None, client_secret=None,
+            #              scopes=None):
+            credentials = Credentials(
+                token=dss_client.config.oauth2_token.access_token,
+                refresh_token=dss_client.config.oauth2_token.refresh_token,
+                id_token=dss_client.config.oauth2_token.id_token,
+                token_uri=dss_client.config.application_secrets.installed.token_uri,
+                client_id=dss_client.config.application_secrets.installed.client_id,
+                client_secret=dss_client.config.application_secrets.installed.client_secret,
+                scopes=dss_client.config.oauth2_token.scope
+            )
+            return credentials
+
+        self.gs_client = Client(project=self.dss_client.config.application_secrets.installed.project_id,
+                                credentials=get_gs_credentials_from_dss_config(self.dss_client))
+
 
     def upload_cloud_file_by_reference(self,
                                        filename: str,
@@ -157,18 +183,20 @@ class DssUploader:
             input_metadata = dict(size=size)
             s3_metadata: Dict[str, Any] = dict()
             gs_metadata: Dict[str, Any] = dict()
-            for cloud_url in file_cloud_urls:
-                url = urlparse(cloud_url)
-                bucket = url.netloc
-                key = url.path[1:]
-                if not (bucket and key):
-                    raise FileURLError(f'Invalid URL {cloud_url}')
-                if url.scheme == "s3":
-                    s3_metadata = _get_s3_file_metadata(bucket, key)
-                elif url.scheme == "gs":
-                    gs_metadata = _get_gs_file_metadata(bucket, key)
-                else:
-                    raise FileURLError("Unsupported cloud URL scheme: {cloud_url}")
+            # TODO Need to implement use of different sets of credentials for access NIH data
+            # (on S3 and GS) versus accessing the DSS. Temporarily comment this out until that is done.
+            # for cloud_url in file_cloud_urls:
+            #     url = urlparse(cloud_url)
+            #     bucket = url.netloc
+            #     key = url.path[1:]
+            #     if not (bucket and key):
+            #         raise FileURLError(f'Invalid URL {cloud_url}')
+            #     if url.scheme == "s3":
+            #         s3_metadata = _get_s3_file_metadata(bucket, key)
+            #     elif url.scheme == "gs":
+            #         gs_metadata = _get_gs_file_metadata(bucket, key)
+            #     else:
+            #         raise FileURLError("Unsupported cloud URL scheme: {cloud_url}")
             return _consolidate_metadata(file_cloud_urls, input_metadata, s3_metadata, gs_metadata, guid)
 
         def _get_s3_file_metadata(bucket: str, key: str) -> dict:
@@ -184,13 +212,17 @@ class DssUploader:
                 response = self.s3_client.head_object(Bucket=bucket, Key=key, RequestPayer="requester")
             except botocore.exceptions.ClientError as e:
                 if e.response['Error']['Code'] == str(requests.codes.not_found):
-                    warn(f'Could not find \"s3://{bucket}/{key}\" Error: {e}'
-                         ' The S3 file metadata for this file reference will be missing.',
-                         CloudUrlNotFound)
+                    # warnings.warn(f'Could not find \"s3://{bucket}/{key}\" Error: {e}'
+                    #               ' The S3 file metadata for this file reference will be missing.',
+                    #               CloudUrlNotFound)
+                    logger.warning(f'Could not find \"s3://{bucket}/{key}\" Error: {e}'
+                                  ' The S3 file metadata for this file reference will be missing.')
                 else:
-                    warn(f"Failed to access \"s3://{bucket}/{key}\" Error: {e}"
-                         " The S3 file metadata for this file reference will be missing.",
-                         CloudUrlAccessWarning)
+                    # warnings.warn(f"Failed to access \"s3://{bucket}/{key}\" Error: {e}"
+                    #               " The S3 file metadata for this file reference will be missing.",
+                    #               CloudUrlAccessWarning)
+                    logger.warning(f"Failed to access \"s3://{bucket}/{key}\" Error: {e}"
+                                  " The S3 file metadata for this file reference will be missing.")
             else:
                 try:
                     metadata['size'] = response['ContentLength']
@@ -210,8 +242,16 @@ class DssUploader:
             :param key: GS file to upload.  e.g. 'output.txt' or 'data/output.txt'
             :return: A dictionary of metadata values.
             """
-            gs_bucket = self.gs_client.bucket(bucket, self.google_project_id)
-            blob_obj = gs_bucket.get_blob(key)
+            # TODO This block needs to be improved!
+            # The following does a GET on the object, which the NIH does not allow?
+            # Need to change this to a HEAD request?
+            try:
+                gs_bucket = self.gs_client.bucket(bucket, self.google_project_id)
+                blob_obj = gs_bucket.get_blob(key)
+            except Exception as e:
+                logger.info("Failed to access gs://{bucket}/{key} Exception: %s %s", type(e), str(e))
+                blob_obj = None
+
             if blob_obj is not None:
                 metadata = dict()
                 metadata['size'] = blob_obj.size
@@ -219,9 +259,8 @@ class DssUploader:
                 metadata['crc32c'] = binascii.hexlify(base64.b64decode(blob_obj.crc32c)).decode("utf-8").lower()
                 return metadata
             else:
-                warn(f'Could not find "gs://{bucket}/{key}"'
-                     ' The GS file metadata for this file reference will be missing.',
-                     CloudUrlNotFound)
+                logger.warning(f'Could not find/access "gs://{bucket}/{key}"'
+                              ' The GS file metadata for this file reference will be missing.')
                 return dict()
 
         def _consolidate_metadata(file_cloud_urls: set,
