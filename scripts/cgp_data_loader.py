@@ -17,7 +17,7 @@ from util import load_json_from_file, suppress_verbose_logging
 
 # Google Cloud Access
 # TODO Make GOOGLE_PROJECT_ID configurable via a command-line option
-GOOGLE_PROJECT_ID = "platform-dev-178517"  # For requester pays buckets
+GOOGLE_PROJECT_ID = "ucsc-cgp-production"  # For requester pays buckets
 
 
 def main(argv=sys.argv[1:]):
