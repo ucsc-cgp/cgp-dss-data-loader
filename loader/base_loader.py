@@ -44,14 +44,18 @@ logger = logging.getLogger(__name__)
 
 CREATOR_ID = 20
 
+
 class CloudUrlAccessWarning(Warning):
     """Warning when a cloud URL could not be accessed for any reason"""
+
 
 class CloudUrlAccessForbidden(CloudUrlAccessWarning):
     """Warning when a cloud URL could not be accessed due to authorization issues"""
 
+
 class CloudUrlNotFound(CloudUrlAccessWarning):
     """Warning when a cloud URL was not found"""
+
 
 class FileURLError(Exception):
     """Thrown when a file cannot be accessed by the given URl"""
@@ -110,7 +114,7 @@ class DssUploader:
                                        file_cloud_urls: set,
                                        size: int,
                                        guid: str,
-                                       file_version: str=None) -> tuple:
+                                       file_version: str = None) -> tuple:
         """
         Loads the given cloud file into the DSS by reference, rather than by copying it into the DSS.
         Because the HCA DSS per se does not support loading by reference, this is currently implemented
@@ -284,8 +288,8 @@ class DssUploader:
     def upload_dict_as_file(self, value: dict,
                             filename: str,
                             file_uuid: str,
-                            file_version: str=None,  # RFC3339
-                            content_type=None):
+                            file_version: str = None,  # RFC3339
+                            content_type: str = None):
         """
         Create a JSON file in the DSS containing the given dict.
 
@@ -310,8 +314,8 @@ class DssUploader:
 
     def upload_local_file(self, path: str,
                           file_uuid: str,
-                          file_version: str=None,
-                          content_type=None):
+                          file_version: str = None,
+                          content_type: str = None):
         """
         Upload a file from the local file system to the DSS.
 
@@ -414,8 +418,8 @@ class DssUploader:
     def _upload_tagged_cloud_file_to_dss_by_copy(self, source_bucket: str,
                                                  source_key: str,
                                                  file_uuid: str,
-                                                 file_version: str=None,
-                                                 timeout_seconds=1200):
+                                                 file_version: str = None,
+                                                 timeout_seconds: int = 1200):
         """
         Uploads a tagged file contained in a cloud bucket to the DSS by copy.
         This is typically used to update a tagged file from a staging bucket into the DSS.
