@@ -7,6 +7,7 @@ Script to load files and bundles into the HCA DSS.
 import logging
 import os
 import sys
+import argparse
 
 pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))  # noqa
 sys.path.insert(0, pkg_root)  # noqa
@@ -15,13 +16,8 @@ from loader import base_loader
 from loader.standard_loader import StandardFormatBundleUploader
 from util import load_json_from_file, suppress_verbose_logging
 
-# Google Cloud Access
-# TODO Make GOOGLE_PROJECT_ID configurable via a command-line option
-GOOGLE_PROJECT_ID = "platform-dev-178517"  # For requester pays buckets
-
 
 def main(argv=sys.argv[1:]):
-    import argparse
     parser = argparse.ArgumentParser(description=__doc__)
     dry_run_group = parser.add_mutually_exclusive_group(required=True)
     dry_run_group.add_argument("--dry-run", dest="dry_run", action="store_true",
@@ -39,6 +35,22 @@ def main(argv=sys.argv[1:]):
                         help='Upload bundles serially. This can be useful for debugging')
     parser.add_argument('input_json', metavar='INPUT_JSON',
                         help="Path to the standard JSON format input file")
+    parser.add_argument('-p', '--project-id', dest='project_id', default='platform-dev-178517',
+                        help='Specify the Google project ID for access to GCP requester pays buckets.')
+    parser.add_argument('--aws-metadata-cred', dest='aws_metadata_cred', default=None,
+                        help='The loader by default needs no additional credentials to '
+                             'access public AWS references, but when attempting to access '
+                             'private AWS files in order to determine size and hash '
+                             'metadata it may be blocked.  This field supplies a '
+                             'path to a file containing additional credentials '
+                             'needed to access the referenced files directly.')
+    parser.add_argument('--gcp-metadata-cred', dest='gcp_metadata_cred', default=None,
+                        help='The loader by default needs no additional credentials to '
+                             'access public Google references, but when attempting to access '
+                             'private Google files in order to determine size and hash '
+                             'metadata it may be blocked.  This field supplies a '
+                             'path to a file containing additional credentials '
+                             'needed to access the referenced files directly.')
 
     options = parser.parse_args(argv)
 
@@ -47,14 +59,15 @@ def main(argv=sys.argv[1:]):
     # os.environ.pop('GOOGLE_APPLICATION_CREDENTIALS', None)
     # os.environ.pop('GOOGLE_APPLICATION_SECRETS', None)
 
-    dss_uploader = base_loader.DssUploader(options.dss_endpoint, options.staging_bucket,
-                                           GOOGLE_PROJECT_ID, options.dry_run)
-    metadata_file_uploader = base_loader.MetadataFileUploader(dss_uploader)
-
     logging.basicConfig(level=logging.getLevelName(options.log_level),
                         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     logging.getLogger(__name__)
     suppress_verbose_logging()
+
+    dss_uploader = base_loader.DssUploader(options.dss_endpoint, options.staging_bucket,
+                                           options.project_id, options.dry_run,
+                                           options.aws_metadata_cred, options.gcp_metadata_cred)
+    metadata_file_uploader = base_loader.MetadataFileUploader(dss_uploader)
 
     if not sys.warnoptions:
         import warnings

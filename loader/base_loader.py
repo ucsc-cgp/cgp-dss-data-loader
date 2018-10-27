@@ -30,6 +30,7 @@ import boto3
 import botocore
 import requests
 from boto3.s3.transfer import TransferConfig
+from google.oauth2.credentials import Credentials
 from cloud_blobstore import s3
 from dcplib import s3_multipart
 from dcplib.checksumming_io import ChecksummingBufferedReader
@@ -74,7 +75,8 @@ class UnexpectedResponseError(Exception):
 
 
 class DssUploader:
-    def __init__(self, dss_endpoint: str, staging_bucket: str, google_project_id: str, dry_run: bool) -> None:
+    def __init__(self, dss_endpoint: str, staging_bucket: str, google_project_id: str, dry_run: bool,
+                 aws_meta_cred: str = None, gcp_meta_cred: str = None) -> None:
         """
         Functions for uploading files to a given DSS.
 
@@ -84,19 +86,27 @@ class DssUploader:
         required by the DSS are assigned to it, then the file is loaded into the DSS (by copy).
         The bucket must be accessible by the DSS. .e.g. 'commons-dss-upload'
         :param google_project_id: A Google `Project ID` to be used when accessing GCP requester pays buckets.
-        e.g. "platform-dev-178517"
-        One way to find a `Project ID` is provided here:
-        https://console.cloud.google.com/cloud-resource-manager
+                                  e.g. "platform-dev-178517"
+                                  One way to find a `Project ID` is provided here:
+                                  https://console.cloud.google.com/cloud-resource-manager
         :param dry_run: If True, log the actions that would be performed yet don't actually execute them.
-        Otherwise, actually perform the operations.
+                        Otherwise, actually perform the operations.
+        :param aws_meta_cred: Optional credentials used to fetch metadata from a private bucket.
+        :param gcp_meta_cred: Optional credentials used to fetch metadata from a private bucket.
         """
+        os.environ['GOOGLE_CLOUD_PROJECT'] = google_project_id
         self.dss_endpoint = dss_endpoint
         self.staging_bucket = staging_bucket
         self.google_project_id = google_project_id
         self.dry_run = dry_run
         self.s3_client = boto3.client("s3")
         self.s3_blobstore = s3.S3BlobStore(self.s3_client)
-        self.gs_client = Client()
+        self.gs_client = Client(project=self.google_project_id)
+
+        # optional clients for fetching protected metadata that the
+        # main credentials may not have access to
+        self.s3_metadata_client = self.get_s3_metadata_client(aws_meta_cred)
+        self.gs_metadata_client = self.get_gs_metadata_client(gcp_meta_cred)
 
         # Work around problems with DSSClient initialization when there is
         # existing HCA configuration. The following issue has been submitted:
@@ -107,6 +117,108 @@ class DssUploader:
         dss_config = HCAConfig(name='loader', save_on_exit=False, autosave=False)
         dss_config['DSSClient'].swagger_url = f'{self.dss_endpoint}/swagger.json'
         self.dss_client = DSSClient(config=dss_config)
+
+    @staticmethod
+    def get_s3_metadata_client(aws_meta_cred, session='NIH-Test', duration=43199):
+        """
+        Access AWS credentials from a file and supply a client for them.
+
+        :param aws_meta_cred: File containing an AWS ARN for an AssumedRole, e.g.:
+                              'arn:aws:iam::************:role/ROLE_NAME_HERE'
+        :param duration: How long, in seconds, the AssumedRole will be valid for.
+        :return: An AWS s3 client object authorized with the above credentials or None.
+        """
+        if not aws_meta_cred:
+            return None
+
+        sts_client = boto3.client('sts')
+        with open(aws_meta_cred, 'r') as f:
+            role_arn = f.read().strip()
+
+        # DurationSeconds can have a value from 900s to 43200s (as of 10.23.2018).
+        # 900s = 15 min; 43200s = 12 hours
+        # https://docs.aws.amazon.com/cli/latest/reference/sts/assume-role.html
+        assumed_role = sts_client.assume_role(RoleArn=role_arn, RoleSessionName=session, DurationSeconds=duration)
+
+        credentials = assumed_role['Credentials']
+        return boto3.client('s3',
+                            aws_access_key_id=credentials['AccessKeyId'],
+                            aws_secret_access_key=credentials['SecretAccessKey'],
+                            aws_session_token=credentials['SessionToken'])
+
+    def get_gs_metadata_client(self, gcp_meta_cred):
+        """
+        Access Google credentials from a file and supply a client for them.
+
+        :param gcp_meta_cred: File containing user credentials, usually generated via:
+                                gcloud auth application-default login
+                              Default location:
+                                '/home/<user>/.config/gcloud/application_default_credentials.json'
+        :return: A google storage client object authorized with the above credentials or None.
+        """
+        if not gcp_meta_cred:
+            return None
+
+        credentials = Credentials(token=None).from_authorized_user_file(gcp_meta_cred)
+        return Client(project=self.google_project_id, credentials=credentials)
+
+    def get_s3_file_metadata(self, bucket: str, key: str) -> dict:
+        """
+        Format an S3 file's metadata into a dictionary for uploading as a json.
+
+        :param bucket: Name of an S3 bucket
+        :param key: S3 file to upload.  e.g. 'output.txt' or 'data/output.txt'
+        :return: A dictionary of metadata values.
+        """
+        metadata = dict()
+        client = self.s3_metadata_client if self.s3_metadata_client else self.s3_client
+        try:
+            response = client.head_object(Bucket=bucket, Key=key, RequestPayer="requester")
+        except botocore.exceptions.ClientError as e:
+            if e.response['Error']['Code'] == str(requests.codes.not_found):
+                warn(f'Could not find \"s3://{bucket}/{key}\" Error: {e}'
+                     ' The S3 file metadata for this file reference will be missing.',
+                     CloudUrlNotFound)
+            else:
+                warn(f"Failed to access \"s3://{bucket}/{key}\" Error: {e}"
+                     " The S3 file metadata for this file reference will be missing.",
+                     CloudUrlAccessWarning)
+        else:
+            try:
+                metadata['size'] = response['ContentLength']
+                metadata['content-type'] = response['ContentType']
+                metadata['s3_etag'] = response['ETag']
+            except KeyError as e:
+                # These standard metadata should always be present.
+                logging.error(f'Could not find "s3://{bucket}/{key}" file metadata field. Error: {e}.\n'
+                              f'The S3 file metadata for this file is inaccessible with your current credentials.  '
+                              f'Please supply additional metadata credentials using the --aws-metadata-cred option.')
+        return metadata
+
+    def get_gs_file_metadata(self, bucket: str, key: str) -> dict:
+        """
+        Format a GS file's metadata into a dictionary for uploading as a JSON file.
+
+        :param bucket: Name of a GS bucket.
+        :param key: GS file to upload.  e.g. 'output.txt' or 'data/output.txt'
+        :return: A dictionary of metadata values.
+        """
+        metadata = dict()
+        client = self.gs_metadata_client if self.gs_metadata_client else self.gs_client
+        gs_bucket = client.bucket(bucket, self.google_project_id)
+        blob_obj = gs_bucket.get_blob(key)
+        if blob_obj is not None:
+            metadata['size'] = blob_obj.size
+            metadata['content-type'] = blob_obj.content_type
+            metadata['crc32c'] = binascii.hexlify(base64.b64decode(blob_obj.crc32c)).decode("utf-8").lower()
+            return metadata
+        else:
+            # These standard metadata should always be present.
+            warn(f'Could not find "gs://{bucket}/{key}".  The S3 file metadata for this file is inaccessible '
+                 f'with your current credentials.  Please supply metadata credentials using the '
+                 f'--gcp-metadata-cred option.',
+                 CloudUrlNotFound)
+            return metadata
 
     def upload_cloud_file_by_reference(self,
                                        filename: str,
@@ -143,7 +255,6 @@ class DssUploader:
         :raises MissingFileSize: If no input file size is available for file to be loaded by reference
         :raises InconsistentFileSizeValues: If file sizes are inconsistent for file to be loaded by reference
         """
-
         def _create_file_reference(file_cloud_urls: set, size: int, guid: str) -> dict:
             """
             Format a file's metadata into a dictionary for uploading as a json to support the approach
@@ -157,7 +268,6 @@ class DssUploader:
             :param size: file size in bytes from input data
             :return: A dictionary of metadata values.
             """
-
             input_metadata = dict(size=size)
             s3_metadata: Dict[str, Any] = dict()
             gs_metadata: Dict[str, Any] = dict()
@@ -168,65 +278,12 @@ class DssUploader:
                 if not (bucket and key):
                     raise FileURLError(f'Invalid URL {cloud_url}')
                 if url.scheme == "s3":
-                    s3_metadata = _get_s3_file_metadata(bucket, key)
+                    s3_metadata = self.get_s3_file_metadata(bucket, key)
                 elif url.scheme == "gs":
-                    gs_metadata = _get_gs_file_metadata(bucket, key)
+                    gs_metadata = self.get_gs_file_metadata(bucket, key)
                 else:
                     raise FileURLError("Unsupported cloud URL scheme: {cloud_url}")
             return _consolidate_metadata(file_cloud_urls, input_metadata, s3_metadata, gs_metadata, guid)
-
-        def _get_s3_file_metadata(bucket: str, key: str) -> dict:
-            """
-            Format an S3 file's metadata into a dictionary for uploading as a json.
-
-            :param bucket: Name of an S3 bucket
-            :param key: S3 file to upload.  e.g. 'output.txt' or 'data/output.txt'
-            :return: A dictionary of metadata values.
-            """
-            metadata = dict()
-            try:
-                response = self.s3_client.head_object(Bucket=bucket, Key=key, RequestPayer="requester")
-            except botocore.exceptions.ClientError as e:
-                if e.response['Error']['Code'] == str(requests.codes.not_found):
-                    warn(f'Could not find \"s3://{bucket}/{key}\" Error: {e}'
-                         ' The S3 file metadata for this file reference will be missing.',
-                         CloudUrlNotFound)
-                else:
-                    warn(f"Failed to access \"s3://{bucket}/{key}\" Error: {e}"
-                         " The S3 file metadata for this file reference will be missing.",
-                         CloudUrlAccessWarning)
-            else:
-                try:
-                    metadata['size'] = response['ContentLength']
-                    metadata['content-type'] = response['ContentType']
-                    metadata['s3_etag'] = response['ETag']
-                except KeyError as e:
-                    # These standard metadata should always be present.
-                    logging.error(f'Failed to access "s3://{bucket}/{key}" file metadata field. Error: {e}'
-                                  ' The S3 file metadata for this file will be incomplete.')
-            return metadata
-
-        def _get_gs_file_metadata(bucket: str, key: str) -> dict:
-            """
-            Format a GS file's metadata into a dictionary for uploading as a JSON file.
-
-            :param bucket: Name of a GS bucket.
-            :param key: GS file to upload.  e.g. 'output.txt' or 'data/output.txt'
-            :return: A dictionary of metadata values.
-            """
-            gs_bucket = self.gs_client.bucket(bucket, self.google_project_id)
-            blob_obj = gs_bucket.get_blob(key)
-            if blob_obj is not None:
-                metadata = dict()
-                metadata['size'] = blob_obj.size
-                metadata['content-type'] = blob_obj.content_type
-                metadata['crc32c'] = binascii.hexlify(base64.b64decode(blob_obj.crc32c)).decode("utf-8").lower()
-                return metadata
-            else:
-                warn(f'Could not find "gs://{bucket}/{key}"'
-                     ' The GS file metadata for this file reference will be missing.',
-                     CloudUrlNotFound)
-                return dict()
 
         def _consolidate_metadata(file_cloud_urls: set,
                                   input_metadata: Dict[str, Any],
@@ -237,13 +294,14 @@ class DssUploader:
             Consolidates cloud file metadata to create the JSON used to load by reference
             into the DSS.
 
-            :param input_metadata:
+            :param input_metadata: An initial dictionary containing metadata about the file
+                                   provided by the input file to the loader.
             :param file_cloud_urls: A set of 'gs://' and 's3://' bucket URLs.
                                     e.g. {'gs://broad-public-datasets/g.bam', 's3://ucsc-topmed-datasets/a.bam'}
-            :param s3_metadata: Dictionary of meta data produced by _get_s3_file_metadata().
-            :param gs_metadata: Dictionary of meta data produced by _get_gs_file_metadata().
+            :param s3_metadata: Dictionary of meta data produced by self.get_s3_file_metadata().
+            :param gs_metadata: Dictionary of meta data produced by self.get_gs_file_metadata().
             :param guid: An optional additional/alternate data identifier/alias to associate with the file
-            e.g. "dg.4503/887388d7-a974-4259-86af-f5305172363d"
+                         e.g. "dg.4503/887388d7-a974-4259-86af-f5305172363d"
             :return: A dictionary of cloud file metadata values
             """
 

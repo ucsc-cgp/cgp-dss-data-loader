@@ -28,16 +28,69 @@ Simple data loader for CGP HCA Data Store
 Because this program uses Amazon Web Services and Google Cloud Platform, you will need to set up credentials
 for both of these before you can run the program.
 
-### AWS credentials
+### AWS Credentials
 1. If you haven't already you will need to make an IAM user and create a new access key. Instructions are
    [here](https://docs.aws.amazon.com/general/latest/gr/managing-aws-access-keys.html).
 
 1. Next you will need to store your credentials so that Boto can access them. Instructions are
    [here](https://boto3.readthedocs.io/en/latest/guide/configuration.html).
 
-### GCP credentials
+### GCP Credentials
 1. Follow the steps [here](https://cloud.google.com/docs/authentication/getting-started) to set up your Google
    Credentials.
+
+## (Optional) Cloud Metadata Credentials Setup
+When the loader submits data, it actually needs access to the referenced files in the account to obtain metadata 
+(e.g. hash and size) that may be in another account.
+
+If the data is public, this is unnecessary.  However, if access is controlled, additional credentials must be provided.
+
+If using metadata credentials, it's strongly encouraged to perform a dry run first as a test.  This will ensure your 
+credentials are correct.
+
+### (Optional) GCP Metadata Credentials
+If GCP files are being loaded that specifically require Google user credentials 
+(rather than Google Service Account credentials), perform the following steps:
+
+1. Make sure you have [gcloud](https://cloud.google.com/sdk/install) installed.
+
+1. gcloud auth application-default login
+
+1. Follow the link to the account accessed.
+
+1. This will generate a json with your user credentials with a path similar to:
+
+    `/home/<user>/.config/gcloud/application_default_credentials.json`
+
+1. Copy this json to another location so that it will not accidentally be used as a default by the main application.
+
+1. This file can then be used by the loader by specifying (as an example):
+
+    `--gce-metadata-cred=/home/<user>/metadata_credentials/my_user_credentials.json`
+
+### (Optional) AWS Metadata Credentials
+For when AWS files are being loaded that require assuming a role for access.
+
+**One caveat, AWS allows a maximum of 12 hours under an assumed role for a single session, so 
+if loading takes longer than that, it may break.
+
+This involves the setup of an AssumedRole on the account that your main AWS credentials have access to.  If 
+this is done already, all you need to do is supply a file containing the AWS ARN to that assumed role and the
+loader will assume the role on your behalf when gathering information about the metadata.
+
+Additional information on setting up an AssumedRole through AWS:
+- https://docs.aws.amazon.com/IAM/latest/UserGuide/tutorial_cross-account-with-roles.html
+- https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use_switch-role-api.html
+
+If AWS files are being loaded that require assuming a role for access, perform the following steps:
+
+1. Write a file containing the ARN, for example:
+
+    `arn:aws:iam::************:role/ROLE_NAME_HERE`
+
+1. This file can then be used by the loader by specifying (as an example):
+
+    `--aws-metadata-cred=/home/<user>/aws_credentials.config`
 
 ## Running Tests
 Run:
@@ -60,10 +113,16 @@ Run:
 
 1. Now that we have our new transformed output we can run it with the loader.
 
-    If you used the standard transformer use the command:
+   If accessing public access data, use the command:
 
    ```
    dssload --no-dry-run --dss-endpoint MY_DSS_ENDPOINT --staging-bucket NAME_OF_MY_S3_BUCKET transformed-topmed-public.json
+   ```
+   
+   Alternatively, if supplying additional credentials for private data:
+
+   ```
+   dssload --no-dry-run --dss-endpoint MY_DSS_ENDPOINT --staging-bucket NAME_OF_MY_S3_BUCKET -p GOOGLE_PROJECT_ID --gce-metadata-cred=gs_credentials.json --aws-metadata-cred=aws_credentials.config gtex.json
    ```
 
 1. You did it!
