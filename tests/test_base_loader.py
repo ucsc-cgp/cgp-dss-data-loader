@@ -42,7 +42,7 @@ class TestBaseLoader(AbstractLoaderTest):
         """Fetches a credentialed client using the get_gs_metadata_client() function."""
         metaclient = self.dss_uploader.get_s3_metadata_client(credentials, session='travis', duration=901)
         import time
-        time.wait(1000)
+        time.sleep(930)
         response = metaclient.head_object(Bucket=self.base_loader_aws_bucket, Key=self.base_loader_aws_key, RequestPayer="requester")
         return response
 
